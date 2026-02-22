@@ -291,6 +291,7 @@ class WhisperManager:
     def __init__(self):
         self._model = None
         self._config = None
+        self._lock = threading.Lock()
 
     def transcribe(
         self,
@@ -299,34 +300,33 @@ class WhisperManager:
         model_name: str,
         device: str,
         compute_type: str,
+        vad_filter: bool = True,
     ) -> tuple[str, Optional[str]]:
         if WhisperModel is None:
             raise RuntimeError("faster-whisper is not installed.")
         if audio.size == 0:
             return "", None
 
-        warning = None
-        config = (model_name, device, compute_type)
-        if self._model is None or self._config != config:
-            try:
-                self._model = WhisperModel(model_name, device=device, compute_type=compute_type)
-                self._config = config
-            except Exception as exc:
-                warning = f"STT fallback to CPU/int8 (reason: {exc})"
+        with self._lock:
+            warning = None
+            config = (model_name, device, compute_type)
+            if self._model is None or self._config != config:
                 try:
-                    self._model = WhisperModel(model_name, device="cpu", compute_type="int8")
-                    self._config = (model_name, "cpu", "int8")
-                except Exception as exc2:
-                    raise RuntimeError(f"Failed to init Whisper model: {exc2}") from exc2
-        segments, _ = self._model.transcribe(
-            audio,
-            language=language,
-            beam_size=5,
-            vad_filter=True,
-            vad_parameters={"min_silence_duration_ms": 500},
-        )
-        text = "".join(segment.text for segment in segments).strip()
-        return text, warning
+                    self._model = WhisperModel(model_name, device=device, compute_type=compute_type)
+                    self._config = config
+                except Exception as exc:
+                    warning = f"STT fallback to CPU/int8 (reason: {exc})"
+                    try:
+                        self._model = WhisperModel(model_name, device="cpu", compute_type="int8")
+                        self._config = (model_name, "cpu", "int8")
+                    except Exception as exc2:
+                        raise RuntimeError(f"Failed to init Whisper model: {exc2}") from exc2
+            transcribe_kwargs: dict = {"language": language, "beam_size": 5, "vad_filter": vad_filter}
+            if vad_filter:
+                transcribe_kwargs["vad_parameters"] = {"min_silence_duration_ms": 500}
+            segments, _ = self._model.transcribe(audio, **transcribe_kwargs)
+            text = "".join(segment.text for segment in segments).strip()
+            return text, warning
 
 
 def resample_audio(audio: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
@@ -398,7 +398,7 @@ class WakeWordWorker(QtCore.QRunnable):
 
     def run(self):
         try:
-            frames = int(self.samplerate * 1.2)
+            frames = int(self.samplerate * 2.0)
             audio = sd.rec(
                 frames,
                 samplerate=self.samplerate,
@@ -685,6 +685,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.monitor.spectrumChanged.connect(self.on_monitor_spectrum)
         self.monitor.error.connect(self.on_monitor_error)
         self.whisper = WhisperManager()
+        self.wake_whisper = WhisperManager()
         self.history = HistoryStore()
         self.messages: List[ChatMessage] = []
         self._monitor_paused = False
@@ -794,7 +795,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._wake_busy = True
         language = self.language_combo.currentData() or "de"
         worker = WakeWordWorker(
-            self.whisper,
+            self.wake_whisper,
             device_index,
             samplerate,
             "simon",
@@ -1133,8 +1134,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stt_device_combo.setCurrentIndex(
             self.stt_device_combo.findData(self.settings.value("stt_device", "auto"))
         )
+        stt_compute = self.settings.value("stt_compute", "int8")
+        if stt_compute == "float16":
+            stt_compute = "int8_float16"
         self.stt_compute_combo.setCurrentIndex(
-            self.stt_compute_combo.findData(self.settings.value("stt_compute", "int8"))
+            self.stt_compute_combo.findData(stt_compute)
         )
         self.sync_preset_from_stt()
         saved_device = self.settings.value("stt_input_device", -1)
@@ -1694,10 +1698,26 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
 def main():
+    # Single-instance lock: prevent multiple simultaneous Simon processes
+    import fcntl
+    lock_path = Path(tempfile.gettempdir()) / "simon_instance.lock"
+    try:
+        lock_fd = open(lock_path, "w")
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        sys.exit(0)
+
     app = QtWidgets.QApplication(sys.argv)
     window = MainWindow()
     window.show()
-    sys.exit(app.exec())
+    exit_code = app.exec()
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        lock_fd.close()
+        lock_path.unlink(missing_ok=True)
+    except Exception:
+        pass
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
