@@ -9,7 +9,7 @@ if [ ! -d "Simon.app" ]; then
   exit 1
 fi
 
-VERSION=$(python - <<'PY'
+VERSION=$(python3 - <<'PY'
 import re
 from pathlib import Path
 text = Path('simon.py').read_text()
