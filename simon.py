@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import shutil
 import zipfile
+import time
 from pathlib import Path
 import os
 from dataclasses import dataclass
@@ -374,6 +375,47 @@ class TranscriptionWorker(QtCore.QRunnable):
             self.signals.error.emit(str(exc))
 
 
+class WakeWordWorker(QtCore.QRunnable):
+    def __init__(
+        self,
+        whisper: WhisperManager,
+        device_index: Optional[int],
+        samplerate: int,
+        wake_word: str,
+    ):
+        super().__init__()
+        self.whisper = whisper
+        self.device_index = device_index
+        self.samplerate = samplerate
+        self.wake_word = wake_word.lower().strip()
+        self.signals = WorkerSignals()
+
+    def run(self):
+        try:
+            frames = int(self.samplerate * 1.2)
+            audio = sd.rec(
+                frames,
+                samplerate=self.samplerate,
+                channels=1,
+                dtype="float32",
+                device=None if self.device_index == -1 else self.device_index,
+            )
+            sd.wait()
+            audio = audio.squeeze()
+            audio = resample_audio(audio, self.samplerate, 16000)
+            text, _warning = self.whisper.transcribe(
+                audio,
+                language="en",
+                model_name="tiny",
+                device="auto",
+                compute_type="int8",
+            )
+            detected = bool(self.wake_word and self.wake_word in text.lower())
+            self.signals.finished.emit({"detected": detected, "text": text})
+        except Exception as exc:
+            self.signals.error.emit(str(exc))
+
+
 class MicTestWorker(QtCore.QRunnable):
     def __init__(self, device: Optional[int], samplerate: int, duration: float = 1.5):
         super().__init__()
@@ -646,6 +688,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._silence_timer = QtCore.QElapsedTimer()
         self._last_voice_ms = 0
         self._mic_prompt_shown = False
+        self._wake_busy = False
+        self._wake_last_trigger = 0.0
+        self._monitor_for_wake = False
 
         self._build_ui()
         self._build_menu()
@@ -690,6 +735,66 @@ class MainWindow(QtWidgets.QMainWindow):
         elif not checked and self._monitor_for_visualizer:
             self._monitor_for_visualizer = False
             self.monitor_check.setChecked(False)
+
+    def on_wake_word_toggled(self, checked: bool) -> None:
+        if checked:
+            if self.monitor_check.isChecked():
+                self._monitor_for_wake = True
+                self.monitor_check.setChecked(False)
+            self._schedule_wake_listen(300)
+        else:
+            if self._monitor_for_wake:
+                self._monitor_for_wake = False
+                self.monitor_check.setChecked(True)
+
+    def _schedule_wake_listen(self, delay_ms: int = 800) -> None:
+        if not self.wake_word_check.isChecked():
+            return
+        QtCore.QTimer.singleShot(delay_ms, self._run_wake_listen)
+
+    def _run_wake_listen(self) -> None:
+        if not self.wake_word_check.isChecked():
+            return
+        if self._wake_busy or self.recorder.is_running or not self.send_button.isEnabled():
+            self._schedule_wake_listen(800)
+            return
+        device_index = self.input_device_combo.currentData()
+        samplerate = 16000
+        if device_index is not None and device_index != -1:
+            try:
+                dev_info = sd.query_devices(int(device_index))
+                samplerate = int(dev_info.get("default_samplerate", 16000))
+            except Exception:
+                samplerate = 16000
+        self._wake_busy = True
+        worker = WakeWordWorker(self.whisper, device_index, samplerate, "simon")
+        worker.signals.finished.connect(self.on_wake_word_done)
+        worker.signals.error.connect(self.on_wake_word_error)
+        self.threadpool.start(worker)
+
+    def on_wake_word_done(self, result: object) -> None:
+        self._wake_busy = False
+        if not self.wake_word_check.isChecked():
+            return
+        detected = False
+        if isinstance(result, dict):
+            detected = bool(result.get("detected"))
+        now = time.monotonic()
+        if detected and (now - self._wake_last_trigger) > 2.0:
+            self._wake_last_trigger = now
+            if not self.recorder.is_running:
+                self.status_label.setText("Wake-Word erkannt")
+                self.start_listening()
+                self._schedule_wake_listen(1200)
+                return
+        self._schedule_wake_listen(400)
+
+    def on_wake_word_error(self, message: str) -> None:
+        self._wake_busy = False
+        if not self.wake_word_check.isChecked():
+            return
+        self._maybe_show_mic_permission_hint(message)
+        self._schedule_wake_listen(1200)
 
     def on_history_search(self) -> None:
         dialog = HistorySearchDialog(self.history, self)
@@ -814,6 +919,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.silence_threshold_spin.setSingleStep(0.01)
         self.silence_threshold_spin.setValue(0.05)
         self.silence_threshold_spin.setDecimals(2)
+        self.wake_word_check = QtWidgets.QCheckBox("Wake-Word (Simon)")
 
         self.update_url_edit = QtWidgets.QLineEdit()
         self.update_url_edit.setPlaceholderText(DEFAULT_UPDATE_URL)
@@ -844,6 +950,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stt_compute_combo.currentIndexChanged.connect(self.on_stt_settings_changed)
         self.monitor_check.toggled.connect(self.on_monitor_toggled)
         self.input_device_combo.currentIndexChanged.connect(self.on_input_device_changed)
+        self.wake_word_check.toggled.connect(self.on_wake_word_toggled)
 
         row = 0
         settings_layout.addWidget(QtWidgets.QLabel("Sprache"), row, 0)
@@ -883,6 +990,10 @@ class MainWindow(QtWidgets.QMainWindow):
         settings_layout.addWidget(self.silence_duration_spin, row, 5)
         settings_layout.addWidget(QtWidgets.QLabel("Schwelle"), row, 6)
         settings_layout.addWidget(self.silence_threshold_spin, row, 7)
+
+        row += 1
+        settings_layout.addWidget(QtWidgets.QLabel("Wake-Word"), row, 0)
+        settings_layout.addWidget(self.wake_word_check, row, 1, 1, 3)
 
         row += 1
         settings_layout.addWidget(QtWidgets.QLabel("API Basis-URL"), row, 0)
@@ -1009,6 +1120,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.silence_duration_spin.setValue(float(self.settings.value("silence_duration", 1.2)))
         self.silence_threshold_spin.setValue(float(self.settings.value("silence_threshold", 0.05)))
         self.visualizer_check.setChecked(self.settings.value("visualizer_enabled", False, bool))
+        self.wake_word_check.setChecked(self.settings.value("wake_word", False, bool))
 
     def closeEvent(self, event):
         self._save_settings()
@@ -1039,6 +1151,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.settings.setValue("silence_duration", self.silence_duration_spin.value())
         self.settings.setValue("silence_threshold", self.silence_threshold_spin.value())
         self.settings.setValue("visualizer_enabled", self.visualizer_check.isChecked())
+        self.settings.setValue("wake_word", self.wake_word_check.isChecked())
 
     def _load_history(self):
         items = self.history.load_recent(limit=40)
