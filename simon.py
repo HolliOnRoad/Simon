@@ -382,12 +382,18 @@ class WakeWordWorker(QtCore.QRunnable):
         device_index: Optional[int],
         samplerate: int,
         wake_word: str,
+        language: str,
+        model_name: str,
+        compute_type: str,
     ):
         super().__init__()
         self.whisper = whisper
         self.device_index = device_index
         self.samplerate = samplerate
         self.wake_word = wake_word.lower().strip()
+        self.language = language
+        self.model_name = model_name
+        self.compute_type = compute_type
         self.signals = WorkerSignals()
 
     def run(self):
@@ -405,10 +411,10 @@ class WakeWordWorker(QtCore.QRunnable):
             audio = resample_audio(audio, self.samplerate, 16000)
             text, _warning = self.whisper.transcribe(
                 audio,
-                language="en",
-                model_name="tiny",
+                language=self.language,
+                model_name=self.model_name,
                 device="auto",
-                compute_type="int8",
+                compute_type=self.compute_type,
             )
             detected = bool(self.wake_word and self.wake_word in text.lower())
             self.signals.finished.emit({"detected": detected, "text": text})
@@ -691,6 +697,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._wake_busy = False
         self._wake_last_trigger = 0.0
         self._monitor_for_wake = False
+        self._wake_status_token = 0
 
         self._build_ui()
         self._build_menu()
@@ -741,11 +748,29 @@ class MainWindow(QtWidgets.QMainWindow):
             if self.monitor_check.isChecked():
                 self._monitor_for_wake = True
                 self.monitor_check.setChecked(False)
+            self._set_wake_status("Lauscht...")
             self._schedule_wake_listen(300)
         else:
             if self._monitor_for_wake:
                 self._monitor_for_wake = False
                 self.monitor_check.setChecked(True)
+            self._set_wake_status("Inaktiv")
+
+    def _set_wake_status(self, text: str, reset_after_ms: Optional[int] = None) -> None:
+        self.wake_status_label.setText(text)
+        if reset_after_ms is None:
+            return
+        self._wake_status_token += 1
+        token = self._wake_status_token
+        QtCore.QTimer.singleShot(reset_after_ms, lambda: self._reset_wake_status(token))
+
+    def _reset_wake_status(self, token: int) -> None:
+        if token != self._wake_status_token:
+            return
+        if self.wake_word_check.isChecked():
+            self.wake_status_label.setText("Lauscht...")
+        else:
+            self.wake_status_label.setText("Inaktiv")
 
     def _schedule_wake_listen(self, delay_ms: int = 800) -> None:
         if not self.wake_word_check.isChecked():
@@ -767,7 +792,16 @@ class MainWindow(QtWidgets.QMainWindow):
             except Exception:
                 samplerate = 16000
         self._wake_busy = True
-        worker = WakeWordWorker(self.whisper, device_index, samplerate, "simon")
+        language = self.language_combo.currentData() or "de"
+        worker = WakeWordWorker(
+            self.whisper,
+            device_index,
+            samplerate,
+            "simon",
+            language,
+            "base",
+            "int8",
+        )
         worker.signals.finished.connect(self.on_wake_word_done)
         worker.signals.error.connect(self.on_wake_word_error)
         self.threadpool.start(worker)
@@ -783,17 +817,26 @@ class MainWindow(QtWidgets.QMainWindow):
         if detected and (now - self._wake_last_trigger) > 2.0:
             self._wake_last_trigger = now
             if not self.recorder.is_running:
+                self._set_wake_status("Erkannt", reset_after_ms=2000)
                 self.status_label.setText("Wake-Word erkannt")
                 self.start_listening()
                 self._schedule_wake_listen(1200)
                 return
-        self._schedule_wake_listen(400)
+        if isinstance(result, dict):
+            snippet = str(result.get("text", "")).strip()
+            if snippet:
+                show = snippet.replace("\n", " ")
+                if len(show) > 40:
+                    show = show[:40] + "..."
+                self._set_wake_status(f"Hoerte: {show}", reset_after_ms=2000)
+        self._schedule_wake_listen(500)
 
     def on_wake_word_error(self, message: str) -> None:
         self._wake_busy = False
         if not self.wake_word_check.isChecked():
             return
         self._maybe_show_mic_permission_hint(message)
+        self._set_wake_status("Fehler beim Lauschen", reset_after_ms=2500)
         self._schedule_wake_listen(1200)
 
     def on_history_search(self) -> None:
@@ -920,6 +963,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.silence_threshold_spin.setValue(0.05)
         self.silence_threshold_spin.setDecimals(2)
         self.wake_word_check = QtWidgets.QCheckBox("Wake-Word (Simon)")
+        self.wake_status_label = QtWidgets.QLabel("Inaktiv")
+        self.wake_status_label.setStyleSheet("color: #666;")
 
         self.update_url_edit = QtWidgets.QLineEdit()
         self.update_url_edit.setPlaceholderText(DEFAULT_UPDATE_URL)
@@ -993,7 +1038,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         row += 1
         settings_layout.addWidget(QtWidgets.QLabel("Wake-Word"), row, 0)
-        settings_layout.addWidget(self.wake_word_check, row, 1, 1, 3)
+        settings_layout.addWidget(self.wake_word_check, row, 1, 1, 2)
+        settings_layout.addWidget(self.wake_status_label, row, 3, 1, 5)
 
         row += 1
         settings_layout.addWidget(QtWidgets.QLabel("API Basis-URL"), row, 0)
