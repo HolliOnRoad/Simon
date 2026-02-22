@@ -24,9 +24,12 @@ GITHUB_REPO=${GITHUB_REPO:-"HolliOnRoad/Simon"}
 mkdir -p dist updates docs/updates
 
 ZIP_PATH="dist/Simon.app.zip"
-rm -f "$ZIP_PATH"
+DMG_PATH="dist/Simon.dmg"
+rm -f "$ZIP_PATH" "$DMG_PATH"
 
 ditto -c -k --keepParent "Simon.app" "$ZIP_PATH"
+
+hdiutil create -volname "Simon" -srcfolder "Simon.app" -ov -format UDZO "$DMG_PATH" >/dev/null
 
 URL=${UPDATE_URL:-"https://github.com/$GITHUB_REPO/releases/download/$TAG/Simon.app.zip"}
 
@@ -36,11 +39,12 @@ JSON
 
 cp -f updates/simon.json docs/updates/simon.json
 
-echo "Release artifacts ready:"
+echo "Release-Artefakte bereit:"
 echo "- $ZIP_PATH"
+echo "- $DMG_PATH"
 echo "- updates/simon.json"
 echo "- docs/updates/simon.json"
 
-echo "\nNext steps:"
-echo "1) Create a GitHub Release $TAG and upload $ZIP_PATH"
-echo "2) Commit updates/simon.json to your repo (or host it via GitHub Pages)"
+echo "\nNaechste Schritte:"
+echo "1) GitHub Release $TAG erstellen und $ZIP_PATH + $DMG_PATH hochladen"
+echo "2) updates/simon.json committen (oder via GitHub Pages ausliefern)"

@@ -1,14 +1,14 @@
 changelog:
   categories:
-    - title: "Features"
+    - title: "Funktionen"
       labels:
         - "feature"
         - "enhancement"
-    - title: "Fixes"
+    - title: "Fehlerbehebungen"
       labels:
         - "bug"
         - "fix"
-    - title: "Maintenance"
+    - title: "Wartung"
       labels:
         - "chore"
         - "docs"

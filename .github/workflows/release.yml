@@ -31,20 +31,25 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: ./release.sh
 
-      - name: Upload release asset
+      - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/Simon.app.zip
+          generate_release_notes: true
+          files: |
+            dist/Simon.app.zip
+            dist/Simon.dmg
 
       - name: Update simon.json on main
         run: |
+          TMP_JSON="/tmp/simon.json"
+          cp -f updates/simon.json "$TMP_JSON"
           git fetch origin main
           git checkout -B main origin/main
+          mkdir -p updates docs/updates
+          cp -f "$TMP_JSON" updates/simon.json
+          cp -f "$TMP_JSON" docs/updates/simon.json
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add updates/simon.json
-          mkdir -p docs/updates
-          cp -f updates/simon.json docs/updates/simon.json
-          git add docs/updates/simon.json
+          git add updates/simon.json docs/updates/simon.json
           git commit -m "Update simon.json for ${{ github.ref_name }}" || echo "No changes"
           git push origin main
