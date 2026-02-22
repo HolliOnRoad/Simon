@@ -1741,6 +1741,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.threadpool.start(worker)
 
     def on_llm_done(self, reply: str):
+        print(f"[LLM Done] reply={reply[:60]!r} auto_listen={self.auto_listen_check.isChecked()} wake={self.wake_word_check.isChecked()}", flush=True)
         self.status_label.setText("Leerlauf")
         self.send_button.setEnabled(True)
         self.listen_button.setEnabled(True)
@@ -1749,8 +1750,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.history.append("assistant", reply)
         if self.auto_speak_check.isChecked():
             self.speak(reply)
-        if self.auto_listen_check.isChecked() and not self.wake_word_check.isChecked():
+        if self.auto_listen_check.isChecked():
             self._waiting_for_voice = True
+            print(f"[AutoRestart] scheduling start_listening in 500ms", flush=True)
             QtCore.QTimer.singleShot(500, self.start_listening)
 
     def on_llm_error(self, message: str):
