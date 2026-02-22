@@ -645,11 +645,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._status_before_update: Optional[str] = None
         self._silence_timer = QtCore.QElapsedTimer()
         self._last_voice_ms = 0
+        self._mic_prompt_shown = False
 
         self._build_ui()
         self._build_menu()
         self._load_settings()
         self._load_history()
+        QtCore.QTimer.singleShot(1200, self.ensure_mic_access)
         if self.auto_update_check.isChecked() and self.update_url_edit.text().strip():
             QtCore.QTimer.singleShot(1200, self.on_check_updates_silent)
 
@@ -692,6 +694,57 @@ class MainWindow(QtWidgets.QMainWindow):
     def on_history_search(self) -> None:
         dialog = HistorySearchDialog(self.history, self)
         dialog.exec()
+
+    def ensure_mic_access(self) -> None:
+        if self._mic_prompt_shown:
+            return
+        device_index = self.input_device_combo.currentData()
+        samplerate = 16000
+        if device_index is not None and device_index != -1:
+            try:
+                dev_info = sd.query_devices(int(device_index))
+                samplerate = int(dev_info.get("default_samplerate", 16000))
+            except Exception:
+                samplerate = 16000
+        try:
+            stream = sd.InputStream(
+                samplerate=samplerate,
+                channels=1,
+                device=None if device_index == -1 else device_index,
+                dtype="float32",
+            )
+            stream.start()
+            stream.stop()
+            stream.close()
+        except Exception as exc:
+            self._maybe_show_mic_permission_hint(str(exc))
+
+    def _maybe_show_mic_permission_hint(self, message: str) -> None:
+        if self._mic_prompt_shown:
+            return
+        lower = message.lower()
+        if "permission" not in lower and "denied" not in lower and "not authorized" not in lower:
+            return
+        self._mic_prompt_shown = True
+        msg = QtWidgets.QMessageBox(self)
+        msg.setWindowTitle("Mikrofon-Zugriff")
+        msg.setText(
+            "Simon hat keinen Mikrofon-Zugriff. "
+            "Bitte aktiviere den Zugriff in den Systemeinstellungen."
+        )
+        open_button = msg.addButton("Einstellungen oeffnen", QtWidgets.QMessageBox.AcceptRole)
+        msg.addButton("OK", QtWidgets.QMessageBox.RejectRole)
+        msg.exec()
+        if msg.clickedButton() == open_button:
+            try:
+                subprocess.Popen(
+                    [
+                        "open",
+                        "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+                    ]
+                )
+            except Exception:
+                pass
 
     def _build_ui(self):
         central = QtWidgets.QWidget()
@@ -1189,6 +1242,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def on_test_mic_error(self, message: str):
         self.status_label.setText(f"Mikrofon-Test Fehler: {message}")
         self.test_mic_button.setEnabled(True)
+        self._maybe_show_mic_permission_hint(message)
         if self.monitor_check.isChecked() and self._monitor_paused:
             self.start_monitor()
         self._monitor_paused = False
@@ -1352,6 +1406,7 @@ class MainWindow(QtWidgets.QMainWindow):
             lower = message.lower()
             if "permission" in lower or "denied" in lower or "not authorized" in lower:
                 message += " (Tipp: Systemeinstellungen → Datenschutz & Sicherheit → Mikrofon)"
+                self._maybe_show_mic_permission_hint(message)
             self.status_label.setText(f"Audio-Fehler: {message}")
 
     def stop_listening(self):
