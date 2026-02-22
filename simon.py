@@ -409,12 +409,18 @@ class WakeWordWorker(QtCore.QRunnable):
             sd.wait()
             audio = audio.squeeze()
             audio = resample_audio(audio, self.samplerate, 16000)
+            # Skip transcription on silence to avoid hallucinations
+            rms = float(np.sqrt(np.mean(audio ** 2)))
+            if rms < 0.008:
+                self.signals.finished.emit({"detected": False, "text": ""})
+                return
             text, _warning = self.whisper.transcribe(
                 audio,
                 language=self.language,
                 model_name=self.model_name,
                 device="auto",
                 compute_type=self.compute_type,
+                vad_filter=False,
             )
             detected = bool(self.wake_word and self.wake_word in text.lower())
             self.signals.finished.emit({"detected": detected, "text": text})
@@ -837,7 +843,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.wake_word_check.isChecked():
             return
         self._maybe_show_mic_permission_hint(message)
-        self._set_wake_status("Fehler beim Lauschen", reset_after_ms=2500)
+        self._set_wake_status(f"Fehler: {message[:60]}", reset_after_ms=4000)
         self._schedule_wake_listen(1200)
 
     def on_history_search(self) -> None:
