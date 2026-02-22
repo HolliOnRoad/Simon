@@ -453,18 +453,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self.whisper = WhisperManager()
         self.messages: List[ChatMessage] = []
         self._monitor_paused = False
+        self._update_check_silent = False
+        self._status_before_update: Optional[str] = None
 
         self._build_ui()
         self._build_menu()
         self._load_settings()
         if self.auto_update_check.isChecked() and self.update_url_edit.text().strip():
-            QtCore.QTimer.singleShot(1200, self.on_check_updates_clicked)
+            QtCore.QTimer.singleShot(1200, self.on_check_updates_silent)
 
     def _build_menu(self):
         menu = self.menuBar().addMenu("Simon")
 
         self.action_check_updates = QtGui.QAction("Nach Updates suchen...", self)
-        self.action_check_updates.triggered.connect(self.on_check_updates_clicked)
+        self.action_check_updates.triggered.connect(lambda: self.on_check_updates_clicked(silent=False))
         menu.addAction(self.action_check_updates)
 
         self.action_auto_updates = QtGui.QAction("Auto-Update-Pruefung", self)
@@ -478,6 +480,9 @@ class MainWindow(QtWidgets.QMainWindow):
         quit_action = QtGui.QAction("Beenden", self)
         quit_action.triggered.connect(QtWidgets.QApplication.quit)
         menu.addAction(quit_action)
+
+    def on_check_updates_silent(self):
+        self.on_check_updates_clicked(silent=True)
 
     def _build_ui(self):
         central = QtWidgets.QWidget()
@@ -888,15 +893,27 @@ class MainWindow(QtWidgets.QMainWindow):
         if hasattr(self, "action_check_updates"):
             self.action_check_updates.setEnabled(enabled)
 
-    def on_check_updates_clicked(self):
+    def _restore_status_after_update_check(self):
+        if self._status_before_update is None:
+            return
+        if self.status_label.text() == "Suche nach Updates...":
+            self.status_label.setText(self._status_before_update)
+        self._status_before_update = None
+
+    def on_check_updates_clicked(self, silent: bool = False):
+        self._update_check_silent = silent
         url = self.update_url_edit.text().strip()
         if not url:
             url = DEFAULT_UPDATE_URL
             self.update_url_edit.setText(url)
         if not url:
-            self.status_label.setText("Update-URL fehlt")
-            QtWidgets.QMessageBox.warning(self, "Updates", "Update-URL fehlt.")
+            if self._update_check_silent:
+                self._restore_status_after_update_check()
+            else:
+                self.status_label.setText("Update-URL fehlt")
+                QtWidgets.QMessageBox.warning(self, "Updates", "Update-URL fehlt.")
             return
+        self._status_before_update = self.status_label.text()
         self.status_label.setText("Suche nach Updates...")
         self.set_update_controls_enabled(False)
         worker = UpdateCheckWorker(url, APP_VERSION)
@@ -907,17 +924,23 @@ class MainWindow(QtWidgets.QMainWindow):
     def on_update_check_done(self, result: object):
         self.set_update_controls_enabled(True)
         if not isinstance(result, dict):
-            self.status_label.setText("Update-Pruefung fehlgeschlagen")
-            QtWidgets.QMessageBox.warning(self, "Updates", "Update-Pruefung fehlgeschlagen.")
+            if self._update_check_silent:
+                self._restore_status_after_update_check()
+            else:
+                self.status_label.setText("Update-Pruefung fehlgeschlagen")
+                QtWidgets.QMessageBox.warning(self, "Updates", "Update-Pruefung fehlgeschlagen.")
+            self._status_before_update = None
+            self._update_check_silent = False
             return
         status = result.get("status")
         if status == "up_to_date":
-            self.status_label.setText("Aktuell")
-            QtWidgets.QMessageBox.information(self, "Updates", "Du hast die aktuelle Version.")
+            self._restore_status_after_update_check()
+            self._update_check_silent = False
             return
         if status == "update":
             latest = result.get("version", "?")
             url = result.get("url", "")
+            self._status_before_update = None
             msg = QtWidgets.QMessageBox(self)
             msg.setWindowTitle("Update verfuegbar")
             msg.setText(f"Version {latest} ist verfuegbar. Jetzt herunterladen und installieren?")
@@ -931,13 +954,21 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.threadpool.start(worker)
             else:
                 self.status_label.setText("Update verschoben")
+            self._update_check_silent = False
             return
         self.status_label.setText("Unbekannter Update-Status")
+        self._status_before_update = None
+        self._update_check_silent = False
 
     def on_update_check_error(self, message: str):
         self.set_update_controls_enabled(True)
-        self.status_label.setText(f"Update-Pruefung Fehler: {message}")
-        QtWidgets.QMessageBox.warning(self, "Updates", f"Update-Pruefung Fehler: {message}")
+        if self._update_check_silent:
+            self._restore_status_after_update_check()
+        else:
+            self.status_label.setText(f"Update-Pruefung Fehler: {message}")
+            QtWidgets.QMessageBox.warning(self, "Updates", f"Update-Pruefung Fehler: {message}")
+        self._status_before_update = None
+        self._update_check_silent = False
 
     def on_update_download_done(self, result: object):
         self.set_update_controls_enabled(True)
