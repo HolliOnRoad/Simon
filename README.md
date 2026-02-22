@@ -102,3 +102,17 @@ git push -u origin main
 ```
 
 Repo: `HolliOnRoad/Simon`.
+
+## GitHub Actions (Release Build)
+Workflow file: `.github/workflows/release.yml`
+
+Create a tag to trigger a build + release upload:
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+This will:
+- build the app on macOS
+- upload `Simon.app.zip` to the GitHub Release
+- update `updates/simon.json` on `main`
