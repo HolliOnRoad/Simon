@@ -28,7 +28,7 @@ class ChatMessage:
     content: str
 
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 DEFAULT_UPDATE_URL = "https://HolliOnRoad.github.io/Simon/updates/simon.json"
 
 STT_PRESETS = [
@@ -913,8 +913,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.status_label.setText("Update-URL fehlt")
                 QtWidgets.QMessageBox.warning(self, "Updates", "Update-URL fehlt.")
             return
-        self._status_before_update = self.status_label.text()
-        self.status_label.setText("Suche nach Updates...")
+        if self._update_check_silent:
+            self._status_before_update = None
+        else:
+            self._status_before_update = self.status_label.text()
+            self.status_label.setText("Suche nach Updates...")
         self.set_update_controls_enabled(False)
         worker = UpdateCheckWorker(url, APP_VERSION)
         worker.signals.finished.connect(self.on_update_check_done)

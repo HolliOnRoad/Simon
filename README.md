@@ -65,7 +65,7 @@ Dann in der App **Updates automatisch pruefen** aktivieren oder im Menue **Simon
 Umgebungsvariablen fuer `release.sh`:
 ```bash
 export GITHUB_REPO="HolliOnRoad/Simon"
-export TAG="v1.0.0"
+export TAG="v1.0.1"
 ```
 
 ## GitHub Pages (Updates)
@@ -82,8 +82,8 @@ Workflow: `.github/workflows/release.yml`
 
 Tag setzen, um Build + Release zu starten:
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.0.1
+git push origin v1.0.1
 ```
 
 Das erzeugt:
