@@ -1134,8 +1134,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self.model_edit.setText(self.settings.value("model", "llama3.1:8b"))
         self.base_url_edit.setText(self.settings.value("api_base", "http://localhost:11434"))
         self.api_key_edit.setText(self.settings.value("api_key", ""))
+        stt_model = self.settings.value("stt_model", "small")
+        # Fall back to small if large-v3 is not cached (avoids silent download failures)
+        if stt_model == "large-v3":
+            from pathlib import Path as _P
+            _cache = _P.home() / ".cache" / "huggingface" / "hub"
+            _has_large = any(
+                (_cache / d / "blobs").exists()
+                for d in (_cache.iterdir() if _cache.exists() else [])
+                if "large-v3" in str(d)
+            )
+            if not _has_large:
+                stt_model = "small"
         self.stt_model_combo.setCurrentIndex(
-            self.stt_model_combo.findData(self.settings.value("stt_model", "small"))
+            self.stt_model_combo.findData(stt_model)
         )
         self.stt_device_combo.setCurrentIndex(
             self.stt_device_combo.findData(self.settings.value("stt_device", "auto"))
