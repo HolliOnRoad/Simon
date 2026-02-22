@@ -995,6 +995,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.system_prompt_edit = QtWidgets.QLineEdit()
 
         self.auto_speak_check = QtWidgets.QCheckBox("Auto-Sprechen")
+        self.auto_listen_check = QtWidgets.QCheckBox("Auto-Neustart")
         self.auto_send_check = QtWidgets.QCheckBox("Auto-Senden bei Stopp")
 
         self.visualizer_check = QtWidgets.QCheckBox("Visualizer aktiv")
@@ -1019,6 +1020,7 @@ class MainWindow(QtWidgets.QMainWindow):
         settings_layout.addWidget(QtWidgets.QLabel("Modell"), row, 4)
         settings_layout.addWidget(self.model_combo, row, 5)
         settings_layout.addWidget(self.auto_speak_check, row, 6)
+        settings_layout.addWidget(self.auto_listen_check, row, 7)
 
         row += 1
         settings_layout.addWidget(QtWidgets.QLabel("STT-Modell"), row, 0)
@@ -1142,13 +1144,11 @@ class MainWindow(QtWidgets.QMainWindow):
         saved_model = self.settings.value("model", "mistral:7b-instruct")
         if self.provider_combo.currentData() == "ollama":
             self._populate_ollama_models()
-        if not self.model_combo.currentText().strip():
-            self.model_combo.setCurrentText(saved_model)
-        # restore saved model after populate (populate may have changed selection)
+        # Select saved model if available, else keep first populated model
         idx = self.model_combo.findText(saved_model)
         if idx >= 0:
             self.model_combo.setCurrentIndex(idx)
-        else:
+        elif self.model_combo.count() == 0:
             self.model_combo.setCurrentText(saved_model)
         self.api_key_edit.setText(self.settings.value("api_key", ""))
         stt_model = self.settings.value("stt_model", "small")
@@ -1202,6 +1202,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.settings.value("system_prompt", "Du bist ein hilfreicher KI-Agent. Antworte kurz und klar.")
         )
         self.auto_speak_check.setChecked(self.settings.value("auto_speak", True, bool))
+        self.auto_listen_check.setChecked(self.settings.value("auto_listen", True, bool))
         # Migration: force auto_send and auto_stop to True if not yet migrated
         if not self.settings.value("migrated_defaults_v2", False, bool):
             self.settings.setValue("auto_send", True)
@@ -1242,6 +1243,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.settings.setValue("piper_endpoint", self.piper_endpoint_edit.text().strip())
         self.settings.setValue("system_prompt", self.system_prompt_edit.text().strip())
         self.settings.setValue("auto_speak", self.auto_speak_check.isChecked())
+        self.settings.setValue("auto_listen", self.auto_listen_check.isChecked())
         self.settings.setValue("auto_send", self.auto_send_check.isChecked())
         self.settings.setValue("ptt_enabled", self.ptt_check.isChecked())
         self.settings.setValue("auto_stop", self.auto_stop_check.isChecked())
@@ -1601,7 +1603,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 if self._last_voice_ms == 0:
                     self._last_voice_ms = elapsed
                 silence_ms = elapsed - self._last_voice_ms
+                if silence_ms > 0 and silence_ms % 500 < 50:
+                    print(f"[AutoStop] level={level:.3f} threshold={threshold:.3f} silence_ms={silence_ms}", flush=True)
                 if silence_ms >= int(self.silence_duration_spin.value() * 1000):
+                    print(f"[AutoStop] TRIGGER level={level:.3f} silence_ms={silence_ms}", flush=True)
                     if self.recorder.is_running:
                         self.stop_listening()
 
@@ -1690,11 +1695,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def on_send_clicked(self):
         text = self.input_edit.toPlainText().strip()
+        print(f"[Send] text={text!r} send_btn_enabled={self.send_button.isEnabled()}", flush=True)
         if not text:
             return
         self.input_edit.clear()
 
         self.append_message("Du", text)
+        print(f"[Send] appended to chat, model={self.model_combo.currentText()}", flush=True)
         self.history.append("user", text)
         self.messages.append(ChatMessage(role="user", content=text))
 
@@ -1728,8 +1735,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.history.append("assistant", reply)
         if self.auto_speak_check.isChecked():
             self.speak(reply)
+        if self.auto_listen_check.isChecked() and not self.wake_word_check.isChecked():
+            QtCore.QTimer.singleShot(500, self.start_listening)
 
     def on_llm_error(self, message: str):
+        print(f"[LLM Error] {message}", flush=True)
         self.status_label.setText(message)
         self.send_button.setEnabled(True)
         self.listen_button.setEnabled(True)
