@@ -8,6 +8,7 @@ import zipfile
 from pathlib import Path
 import os
 from dataclasses import dataclass
+from datetime import datetime
 from typing import List, Optional
 
 import numpy as np
@@ -101,6 +102,69 @@ open \"$OLD\"
     subprocess.Popen(["/bin/zsh", str(helper)], close_fds=True)
 
 
+class HistoryStore:
+    def __init__(self, app_name: str = "Simon"):
+        base_dir = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.AppDataLocation)
+        if base_dir:
+            base = Path(base_dir)
+        else:
+            base = Path.home() / f".{app_name.lower()}"
+        base.mkdir(parents=True, exist_ok=True)
+        self.path = base / "history.jsonl"
+        self._lock = threading.Lock()
+
+    def append(self, role: str, content: str) -> None:
+        item = {
+            "ts": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            "role": role,
+            "content": content,
+        }
+        line = json.dumps(item, ensure_ascii=False)
+        with self._lock:
+            with self.path.open("a", encoding="utf-8") as f:
+                f.write(line + "\n")
+
+    def load_recent(self, limit: int = 80) -> List[dict]:
+        if not self.path.exists():
+            return []
+        with self._lock:
+            try:
+                lines = self.path.read_text(encoding="utf-8").splitlines()
+            except Exception:
+                return []
+        items: List[dict] = []
+        for line in lines[-limit:]:
+            try:
+                items.append(json.loads(line))
+            except Exception:
+                continue
+        return items
+
+    def search(self, query: str, limit: int = 50) -> List[dict]:
+        if not self.path.exists():
+            return []
+        q = query.strip().lower()
+        if not q:
+            return []
+        with self._lock:
+            try:
+                lines = self.path.read_text(encoding="utf-8").splitlines()
+            except Exception:
+                return []
+        results: List[dict] = []
+        for line in reversed(lines):
+            try:
+                item = json.loads(line)
+            except Exception:
+                continue
+            content = str(item.get("content", ""))
+            if q in content.lower():
+                results.append(item)
+                if len(results) >= limit:
+                    break
+        return results
+
+
 class AudioRecorder(QtCore.QObject):
     levelChanged = QtCore.Signal(float)
 
@@ -154,6 +218,7 @@ class AudioRecorder(QtCore.QObject):
 
 class LevelMonitor(QtCore.QObject):
     levelChanged = QtCore.Signal(float)
+    spectrumChanged = QtCore.Signal(list)
     error = QtCore.Signal(str)
 
     def __init__(self, samplerate: int = 16000):
@@ -162,6 +227,10 @@ class LevelMonitor(QtCore.QObject):
         self._stream: Optional[sd.InputStream] = None
         self.is_running = False
         self.device: Optional[int] = None
+        self._spectrum_enabled = False
+
+    def set_spectrum_enabled(self, enabled: bool) -> None:
+        self._spectrum_enabled = enabled
 
     def start(self, device: Optional[int] = None, samplerate: Optional[int] = None) -> None:
         if self.is_running:
@@ -196,6 +265,25 @@ class LevelMonitor(QtCore.QObject):
         rms = float(np.sqrt(np.mean(indata ** 2)))
         level = max(0.0, min(rms * 20.0, 1.0))
         self.levelChanged.emit(level)
+        if self._spectrum_enabled:
+            try:
+                samples = indata[:, 0].copy()
+                if samples.size < 32:
+                    return
+                window = np.hanning(samples.size)
+                spectrum = np.abs(np.fft.rfft(samples * window))
+                if spectrum.size > 1:
+                    spectrum = spectrum[1:]
+                bands = 20
+                chunks = np.array_split(spectrum, bands)
+                levels = [float(np.sqrt(np.mean(chunk ** 2))) for chunk in chunks]
+                peak = max(levels) if levels else 1.0
+                if peak <= 0:
+                    peak = 1.0
+                levels = [min(1.0, val / peak) for val in levels]
+                self.spectrumChanged.emit(levels)
+            except Exception:
+                pass
 
 
 class WhisperManager:
@@ -437,6 +525,103 @@ def escape_html(text: str) -> str:
     )
 
 
+class SpectrumWidget(QtWidgets.QWidget):
+    def __init__(self, bars: int = 20):
+        super().__init__()
+        self._bars = max(8, int(bars))
+        self._levels = [0.0 for _ in range(self._bars)]
+        self._decay = 0.85
+        self.setMinimumHeight(80)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+
+    def set_levels(self, levels: List[float]) -> None:
+        if not levels:
+            levels = [0.0 for _ in range(self._bars)]
+        if len(levels) < self._bars:
+            levels = list(levels) + [0.0] * (self._bars - len(levels))
+        if len(levels) > self._bars:
+            levels = levels[: self._bars]
+        for i, target in enumerate(levels):
+            target = max(0.0, min(float(target), 1.0))
+            decayed = self._levels[i] * self._decay
+            self._levels[i] = max(decayed, target)
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QtGui.QPainter(self)
+        rect = self.rect()
+        painter.fillRect(rect, QtGui.QColor(20, 20, 24))
+        w = rect.width()
+        h = rect.height()
+        gap = 3
+        bar_w = max(1, int((w - gap * (self._bars + 1)) / self._bars))
+        for i, level in enumerate(self._levels):
+            bar_h = int(level * (h - 8))
+            x = gap + i * (bar_w + gap)
+            y = h - bar_h - 4
+            color = QtGui.QColor(80, 200, 255)
+            if level > 0.7:
+                color = QtGui.QColor(255, 140, 80)
+            painter.fillRect(QtCore.QRect(x, y, bar_w, bar_h), color)
+
+
+class HistorySearchDialog(QtWidgets.QDialog):
+    def __init__(self, history: HistoryStore, parent=None):
+        super().__init__(parent)
+        self.history = history
+        self.setWindowTitle("Verlauf durchsuchen")
+        self.resize(680, 460)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        self.search_edit = QtWidgets.QLineEdit()
+        self.search_edit.setPlaceholderText("Suchbegriff eingeben...")
+        layout.addWidget(self.search_edit)
+
+        self.results_list = QtWidgets.QListWidget()
+        layout.addWidget(self.results_list, 1)
+
+        self.preview = QtWidgets.QTextEdit()
+        self.preview.setReadOnly(True)
+        self.preview.setPlaceholderText("Vorschau...")
+        layout.addWidget(self.preview, 1)
+
+        self.search_edit.textChanged.connect(self.on_search_changed)
+        self.results_list.currentItemChanged.connect(self.on_item_changed)
+
+    def on_search_changed(self, text: str) -> None:
+        query = text.strip()
+        self.results_list.clear()
+        self.preview.clear()
+        if len(query) < 2:
+            return
+        results = self.history.search(query, limit=80)
+        for item in results:
+            role = str(item.get("role", ""))
+            label = "Du" if role == "user" else "Simon" if role == "assistant" else role
+            ts = str(item.get("ts", ""))
+            ts_short = ts.replace("T", " ")[:19] if ts else ""
+            content = str(item.get("content", ""))
+            snippet = content.replace("\n", " ").strip()
+            if len(snippet) > 90:
+                snippet = snippet[:90] + "..."
+            display = f"{ts_short} • {label}: {snippet}"
+            lw_item = QtWidgets.QListWidgetItem(display)
+            lw_item.setData(QtCore.Qt.UserRole, item)
+            self.results_list.addItem(lw_item)
+
+    def on_item_changed(self, current, previous) -> None:
+        if current is None:
+            self.preview.clear()
+            return
+        item = current.data(QtCore.Qt.UserRole) or {}
+        role = str(item.get("role", ""))
+        label = "Du" if role == "user" else "Simon" if role == "assistant" else role
+        ts = str(item.get("ts", ""))
+        content = str(item.get("content", ""))
+        header = f"{label} • {ts}".strip()
+        self.preview.setPlainText(f"{header}\n\n{content}")
+
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -449,16 +634,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self.recorder.levelChanged.connect(self.on_level)
         self.monitor = LevelMonitor()
         self.monitor.levelChanged.connect(self.on_monitor_level)
+        self.monitor.spectrumChanged.connect(self.on_monitor_spectrum)
         self.monitor.error.connect(self.on_monitor_error)
         self.whisper = WhisperManager()
+        self.history = HistoryStore()
         self.messages: List[ChatMessage] = []
         self._monitor_paused = False
+        self._monitor_for_visualizer = False
         self._update_check_silent = False
         self._status_before_update: Optional[str] = None
+        self._silence_timer = QtCore.QElapsedTimer()
+        self._last_voice_ms = 0
 
         self._build_ui()
         self._build_menu()
         self._load_settings()
+        self._load_history()
         if self.auto_update_check.isChecked() and self.update_url_edit.text().strip():
             QtCore.QTimer.singleShot(1200, self.on_check_updates_silent)
 
@@ -475,6 +666,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.auto_update_check.toggled.connect(self.action_auto_updates.setChecked)
         menu.addAction(self.action_auto_updates)
 
+        self.action_history_search = QtGui.QAction("Verlauf durchsuchen...", self)
+        self.action_history_search.triggered.connect(self.on_history_search)
+        menu.addAction(self.action_history_search)
+
         menu.addSeparator()
 
         quit_action = QtGui.QAction("Beenden", self)
@@ -483,6 +678,20 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def on_check_updates_silent(self):
         self.on_check_updates_clicked(silent=True)
+
+    def on_visualizer_toggled(self, checked: bool) -> None:
+        self.visualizer_widget.setVisible(checked)
+        self.monitor.set_spectrum_enabled(checked)
+        if checked and not self.monitor_check.isChecked():
+            self._monitor_for_visualizer = True
+            self.monitor_check.setChecked(True)
+        elif not checked and self._monitor_for_visualizer:
+            self._monitor_for_visualizer = False
+            self.monitor_check.setChecked(False)
+
+    def on_history_search(self) -> None:
+        dialog = HistorySearchDialog(self.history, self)
+        dialog.exec()
 
     def _build_ui(self):
         central = QtWidgets.QWidget()
@@ -540,6 +749,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self.test_mic_button = QtWidgets.QPushButton("Auto-Test")
         self.test_mic_button.clicked.connect(self.on_test_mic_clicked)
 
+        self.ptt_check = QtWidgets.QCheckBox("Push-to-Talk (Leertaste)")
+        self.auto_stop_check = QtWidgets.QCheckBox("Auto-Stopp bei Stille")
+        self.silence_duration_spin = QtWidgets.QDoubleSpinBox()
+        self.silence_duration_spin.setRange(0.3, 5.0)
+        self.silence_duration_spin.setSingleStep(0.1)
+        self.silence_duration_spin.setValue(1.2)
+        self.silence_duration_spin.setSuffix(" s")
+        self.silence_threshold_spin = QtWidgets.QDoubleSpinBox()
+        self.silence_threshold_spin.setRange(0.01, 0.2)
+        self.silence_threshold_spin.setSingleStep(0.01)
+        self.silence_threshold_spin.setValue(0.05)
+        self.silence_threshold_spin.setDecimals(2)
+
         self.update_url_edit = QtWidgets.QLineEdit()
         self.update_url_edit.setPlaceholderText(DEFAULT_UPDATE_URL)
         self.auto_update_check = QtWidgets.QCheckBox("Updates automatisch pruefen")
@@ -556,6 +778,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.auto_speak_check = QtWidgets.QCheckBox("Auto-Sprechen")
         self.auto_send_check = QtWidgets.QCheckBox("Auto-Senden bei Stopp")
+
+        self.visualizer_check = QtWidgets.QCheckBox("Visualizer aktiv")
+        self.visualizer_check.toggled.connect(self.on_visualizer_toggled)
+        self.visualizer_widget = SpectrumWidget()
+        self.visualizer_widget.setVisible(False)
 
         self._preset_lock = False
         self.stt_preset_combo.currentIndexChanged.connect(self.on_stt_preset_changed)
@@ -596,6 +823,15 @@ class MainWindow(QtWidgets.QMainWindow):
         settings_layout.addWidget(self.test_mic_button, row, 6, 1, 2)
 
         row += 1
+        settings_layout.addWidget(QtWidgets.QLabel("Aufnahme"), row, 0)
+        settings_layout.addWidget(self.ptt_check, row, 1, 1, 2)
+        settings_layout.addWidget(self.auto_stop_check, row, 3)
+        settings_layout.addWidget(QtWidgets.QLabel("Stille (s)"), row, 4)
+        settings_layout.addWidget(self.silence_duration_spin, row, 5)
+        settings_layout.addWidget(QtWidgets.QLabel("Schwelle"), row, 6)
+        settings_layout.addWidget(self.silence_threshold_spin, row, 7)
+
+        row += 1
         settings_layout.addWidget(QtWidgets.QLabel("API Basis-URL"), row, 0)
         settings_layout.addWidget(self.base_url_edit, row, 1, 1, 4)
         settings_layout.addWidget(QtWidgets.QLabel("API Key"), row, 5)
@@ -621,6 +857,12 @@ class MainWindow(QtWidgets.QMainWindow):
         settings_layout.addWidget(self.version_label, row, 6, 1, 2)
 
         main_layout.addWidget(settings_box)
+
+        visual_box = QtWidgets.QGroupBox("Visualizer")
+        visual_layout = QtWidgets.QHBoxLayout(visual_box)
+        visual_layout.addWidget(self.visualizer_check)
+        visual_layout.addWidget(self.visualizer_widget, 1)
+        main_layout.addWidget(visual_box)
 
         self.chat_view = QtWidgets.QTextEdit()
         self.chat_view.setReadOnly(True)
@@ -709,6 +951,11 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self.auto_speak_check.setChecked(self.settings.value("auto_speak", True, bool))
         self.auto_send_check.setChecked(self.settings.value("auto_send", True, bool))
+        self.ptt_check.setChecked(self.settings.value("ptt_enabled", False, bool))
+        self.auto_stop_check.setChecked(self.settings.value("auto_stop", False, bool))
+        self.silence_duration_spin.setValue(float(self.settings.value("silence_duration", 1.2)))
+        self.silence_threshold_spin.setValue(float(self.settings.value("silence_threshold", 0.05)))
+        self.visualizer_check.setChecked(self.settings.value("visualizer_enabled", False, bool))
 
     def closeEvent(self, event):
         self._save_settings()
@@ -734,6 +981,29 @@ class MainWindow(QtWidgets.QMainWindow):
         self.settings.setValue("system_prompt", self.system_prompt_edit.text().strip())
         self.settings.setValue("auto_speak", self.auto_speak_check.isChecked())
         self.settings.setValue("auto_send", self.auto_send_check.isChecked())
+        self.settings.setValue("ptt_enabled", self.ptt_check.isChecked())
+        self.settings.setValue("auto_stop", self.auto_stop_check.isChecked())
+        self.settings.setValue("silence_duration", self.silence_duration_spin.value())
+        self.settings.setValue("silence_threshold", self.silence_threshold_spin.value())
+        self.settings.setValue("visualizer_enabled", self.visualizer_check.isChecked())
+
+    def _load_history(self):
+        items = self.history.load_recent(limit=40)
+        if not items:
+            return
+        for item in items:
+            role = str(item.get("role", ""))
+            content = str(item.get("content", "")).strip()
+            if not content:
+                continue
+            label = "Du" if role == "user" else "Simon" if role == "assistant" else role
+            self.append_message(label, content)
+            if role in ("user", "assistant"):
+                self.messages.append(ChatMessage(role=role, content=content))
+
+    def _text_input_has_focus(self) -> bool:
+        widget = self.focusWidget()
+        return isinstance(widget, (QtWidgets.QLineEdit, QtWidgets.QPlainTextEdit, QtWidgets.QTextEdit))
 
     def on_provider_changed(self):
         provider = self.provider_combo.currentData()
@@ -819,6 +1089,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if checked:
             self.start_monitor()
         else:
+            if self.visualizer_check.isChecked():
+                self.visualizer_check.setChecked(False)
             self.stop_monitor()
 
     def start_monitor(self):
@@ -830,11 +1102,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 samplerate = int(dev_info.get("default_samplerate", 16000))
             except Exception:
                 samplerate = 16000
+        self.monitor.set_spectrum_enabled(self.visualizer_check.isChecked())
         self.monitor.start(device=None if device_index == -1 else device_index, samplerate=samplerate)
 
     def stop_monitor(self):
         self.monitor.stop()
         self.monitor_bar.setValue(0)
+        self.visualizer_widget.set_levels([])
 
     def restart_monitor(self):
         self.stop_monitor()
@@ -843,8 +1117,38 @@ class MainWindow(QtWidgets.QMainWindow):
     def on_monitor_level(self, level: float):
         self.monitor_bar.setValue(int(level * 100))
 
+    def on_monitor_spectrum(self, levels: List[float]):
+        if self.visualizer_check.isChecked():
+            self.visualizer_widget.set_levels(levels)
+
     def on_monitor_error(self, message: str):
         self.status_label.setText(f"Monitor-Fehler: {message}")
+
+    def keyPressEvent(self, event):
+        if (
+            self.ptt_check.isChecked()
+            and event.key() == QtCore.Qt.Key_Space
+            and not event.isAutoRepeat()
+            and not self._text_input_has_focus()
+        ):
+            if not self.recorder.is_running:
+                self.start_listening()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event):
+        if (
+            self.ptt_check.isChecked()
+            and event.key() == QtCore.Qt.Key_Space
+            and not event.isAutoRepeat()
+            and not self._text_input_has_focus()
+        ):
+            if self.recorder.is_running:
+                self.stop_listening()
+            event.accept()
+            return
+        super().keyReleaseEvent(event)
 
     def on_test_mic_clicked(self):
         device_index = self.input_device_combo.currentData()
@@ -1001,6 +1305,21 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def on_level(self, level: float):
         self.level_bar.setValue(int(level * 100))
+        if self.recorder.is_running and self.auto_stop_check.isChecked():
+            if not self._silence_timer.isValid():
+                self._silence_timer.start()
+                self._last_voice_ms = 0
+            threshold = float(self.silence_threshold_spin.value())
+            if level >= threshold:
+                self._last_voice_ms = self._silence_timer.elapsed()
+            else:
+                elapsed = self._silence_timer.elapsed()
+                if self._last_voice_ms == 0:
+                    self._last_voice_ms = elapsed
+                silence_ms = elapsed - self._last_voice_ms
+                if silence_ms >= int(self.silence_duration_spin.value() * 1000):
+                    if self.recorder.is_running:
+                        self.stop_listening()
 
     def on_listen_clicked(self):
         if not self.recorder.is_running:
@@ -1025,8 +1344,15 @@ class MainWindow(QtWidgets.QMainWindow):
             self.listen_status.setText("Zuhoeren")
             self.listen_button.setText("Stopp")
             self.status_label.setText("Hoere zu...")
+            if self.auto_stop_check.isChecked():
+                self._silence_timer.start()
+                self._last_voice_ms = 0
         except Exception as exc:
-            self.status_label.setText(f"Audio-Fehler: {exc}")
+            message = str(exc)
+            lower = message.lower()
+            if "permission" in lower or "denied" in lower or "not authorized" in lower:
+                message += " (Tipp: Systemeinstellungen → Datenschutz & Sicherheit → Mikrofon)"
+            self.status_label.setText(f"Audio-Fehler: {message}")
 
     def stop_listening(self):
         audio, sample_rate = self.recorder.stop()
@@ -1034,6 +1360,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.listen_button.setText("Zuhoeren")
         self.level_bar.setValue(0)
         self.status_label.setText("Transkribiere...")
+        self._silence_timer.invalidate()
         if self.monitor_check.isChecked() and self._monitor_paused:
             self.start_monitor()
             self._monitor_paused = False
@@ -1082,6 +1409,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.input_edit.clear()
 
         self.append_message("Du", text)
+        self.history.append("user", text)
         self.messages.append(ChatMessage(role="user", content=text))
 
         system_prompt = self.system_prompt_edit.text().strip()
@@ -1111,6 +1439,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.listen_button.setEnabled(True)
         self.messages.append(ChatMessage(role="assistant", content=reply))
         self.append_message("Simon", reply)
+        self.history.append("assistant", reply)
         if self.auto_speak_check.isChecked():
             self.speak(reply)
 
