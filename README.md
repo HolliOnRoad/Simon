@@ -54,7 +54,7 @@ Update-JSON-Format:
 ```
 {"version":"1.0.1","url":"https://example.com/Simon.app.zip"}
 ```
-Dann in der App **Auto-Check** aktivieren oder **Check Now** klicken.
+Dann in der App **Updates automatisch pruefen** aktivieren oder im Menue **Simon → Nach Updates suchen...**.
 
 ### GitHub Release Flow
 1. App bauen: `./build_app.sh`

@@ -455,9 +455,29 @@ class MainWindow(QtWidgets.QMainWindow):
         self._monitor_paused = False
 
         self._build_ui()
+        self._build_menu()
         self._load_settings()
         if self.auto_update_check.isChecked() and self.update_url_edit.text().strip():
             QtCore.QTimer.singleShot(1200, self.on_check_updates_clicked)
+
+    def _build_menu(self):
+        menu = self.menuBar().addMenu("Simon")
+
+        self.action_check_updates = QtGui.QAction("Nach Updates suchen...", self)
+        self.action_check_updates.triggered.connect(self.on_check_updates_clicked)
+        menu.addAction(self.action_check_updates)
+
+        self.action_auto_updates = QtGui.QAction("Auto-Update-Pruefung", self)
+        self.action_auto_updates.setCheckable(True)
+        self.action_auto_updates.toggled.connect(self.auto_update_check.setChecked)
+        self.auto_update_check.toggled.connect(self.action_auto_updates.setChecked)
+        menu.addAction(self.action_auto_updates)
+
+        menu.addSeparator()
+
+        quit_action = QtGui.QAction("Beenden", self)
+        quit_action.triggered.connect(QtWidgets.QApplication.quit)
+        menu.addAction(quit_action)
 
     def _build_ui(self):
         central = QtWidgets.QWidget()
@@ -466,16 +486,16 @@ class MainWindow(QtWidgets.QMainWindow):
         main_layout = QtWidgets.QVBoxLayout(central)
         main_layout.setSpacing(8)
 
-        settings_box = QtWidgets.QGroupBox("Settings")
+        settings_box = QtWidgets.QGroupBox("Einstellungen")
         settings_layout = QtWidgets.QGridLayout(settings_box)
 
         self.language_combo = QtWidgets.QComboBox()
         self.language_combo.addItem("Deutsch (DE)", "de")
-        self.language_combo.addItem("English (US)", "en")
+        self.language_combo.addItem("Englisch (US)", "en")
 
         self.provider_combo = QtWidgets.QComboBox()
-        self.provider_combo.addItem("Local (Ollama)", "ollama")
-        self.provider_combo.addItem("API (OpenAI-compatible)", "openai")
+        self.provider_combo.addItem("Lokal (Ollama)", "ollama")
+        self.provider_combo.addItem("API (OpenAI-kompatibel)", "openai")
         self.provider_combo.currentIndexChanged.connect(self.on_provider_changed)
 
         self.model_edit = QtWidgets.QLineEdit()
@@ -491,13 +511,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stt_model_combo.addItem("large-v3", "large-v3")
 
         self.stt_device_combo = QtWidgets.QComboBox()
-        self.stt_device_combo.addItem("Auto (GPU if available)", "auto")
+        self.stt_device_combo.addItem("Auto (GPU falls verfuegbar)", "auto")
         self.stt_device_combo.addItem("CPU", "cpu")
 
         self.stt_compute_combo = QtWidgets.QComboBox()
-        self.stt_compute_combo.addItem("int8 (fast)", "int8")
-        self.stt_compute_combo.addItem("int8_float16 (balanced)", "int8_float16")
-        self.stt_compute_combo.addItem("float16 (accurate)", "float16")
+        self.stt_compute_combo.addItem("int8 (schnell)", "int8")
+        self.stt_compute_combo.addItem("int8_float16 (balanciert)", "int8_float16")
+        self.stt_compute_combo.addItem("float16 (genau)", "float16")
 
         self.stt_preset_combo = QtWidgets.QComboBox()
         self.stt_preset_combo.addItem("Custom", "custom")
@@ -505,9 +525,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.stt_preset_combo.addItem(label, key)
 
         self.input_device_combo = QtWidgets.QComboBox()
-        self.refresh_devices_button = QtWidgets.QPushButton("Refresh")
+        self.refresh_devices_button = QtWidgets.QPushButton("Aktualisieren")
         self.refresh_devices_button.clicked.connect(self.populate_input_devices)
-        self.monitor_check = QtWidgets.QCheckBox("Monitor")
+        self.monitor_check = QtWidgets.QCheckBox("Mikrofon-Monitor")
         self.monitor_bar = QtWidgets.QProgressBar()
         self.monitor_bar.setRange(0, 100)
         self.monitor_bar.setValue(0)
@@ -517,22 +537,20 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.update_url_edit = QtWidgets.QLineEdit()
         self.update_url_edit.setPlaceholderText(DEFAULT_UPDATE_URL)
-        self.auto_update_check = QtWidgets.QCheckBox("Auto-Check Updates")
-        self.check_update_button = QtWidgets.QPushButton("Check Now")
-        self.check_update_button.clicked.connect(self.on_check_updates_clicked)
+        self.auto_update_check = QtWidgets.QCheckBox("Updates automatisch pruefen")
         self.version_label = QtWidgets.QLabel(f"Version {APP_VERSION}")
         self.version_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
 
         self.tts_combo = QtWidgets.QComboBox()
-        self.tts_combo.addItem("System Voice", "system")
+        self.tts_combo.addItem("Systemstimme", "system")
         self.tts_combo.addItem("Piper (HTTP)", "piper")
         self.tts_voice_edit = QtWidgets.QLineEdit()
         self.piper_endpoint_edit = QtWidgets.QLineEdit()
 
         self.system_prompt_edit = QtWidgets.QLineEdit()
 
-        self.auto_speak_check = QtWidgets.QCheckBox("Auto-Speak")
-        self.auto_send_check = QtWidgets.QCheckBox("Auto-Send on Stop")
+        self.auto_speak_check = QtWidgets.QCheckBox("Auto-Sprechen")
+        self.auto_send_check = QtWidgets.QCheckBox("Auto-Senden bei Stopp")
 
         self._preset_lock = False
         self.stt_preset_combo.currentIndexChanged.connect(self.on_stt_preset_changed)
@@ -543,57 +561,56 @@ class MainWindow(QtWidgets.QMainWindow):
         self.input_device_combo.currentIndexChanged.connect(self.on_input_device_changed)
 
         row = 0
-        settings_layout.addWidget(QtWidgets.QLabel("Language"), row, 0)
+        settings_layout.addWidget(QtWidgets.QLabel("Sprache"), row, 0)
         settings_layout.addWidget(self.language_combo, row, 1)
         settings_layout.addWidget(QtWidgets.QLabel("LLM"), row, 2)
         settings_layout.addWidget(self.provider_combo, row, 3)
-        settings_layout.addWidget(QtWidgets.QLabel("Model"), row, 4)
+        settings_layout.addWidget(QtWidgets.QLabel("Modell"), row, 4)
         settings_layout.addWidget(self.model_edit, row, 5)
         settings_layout.addWidget(self.auto_speak_check, row, 6)
 
         row += 1
-        settings_layout.addWidget(QtWidgets.QLabel("STT Model"), row, 0)
+        settings_layout.addWidget(QtWidgets.QLabel("STT-Modell"), row, 0)
         settings_layout.addWidget(self.stt_model_combo, row, 1)
-        settings_layout.addWidget(QtWidgets.QLabel("Device"), row, 2)
+        settings_layout.addWidget(QtWidgets.QLabel("Geraet"), row, 2)
         settings_layout.addWidget(self.stt_device_combo, row, 3)
-        settings_layout.addWidget(QtWidgets.QLabel("Compute"), row, 4)
+        settings_layout.addWidget(QtWidgets.QLabel("Rechenart"), row, 4)
         settings_layout.addWidget(self.stt_compute_combo, row, 5)
         settings_layout.addWidget(QtWidgets.QLabel("Preset"), row, 6)
         settings_layout.addWidget(self.stt_preset_combo, row, 7)
 
         row += 1
-        settings_layout.addWidget(QtWidgets.QLabel("Input Device"), row, 0)
+        settings_layout.addWidget(QtWidgets.QLabel("Eingabegeraet"), row, 0)
         settings_layout.addWidget(self.input_device_combo, row, 1, 1, 5)
         settings_layout.addWidget(self.refresh_devices_button, row, 6, 1, 2)
 
         row += 1
-        settings_layout.addWidget(QtWidgets.QLabel("Mic Monitor"), row, 0)
+        settings_layout.addWidget(QtWidgets.QLabel("Mikrofon-Monitor"), row, 0)
         settings_layout.addWidget(self.monitor_check, row, 1)
         settings_layout.addWidget(self.monitor_bar, row, 2, 1, 4)
         settings_layout.addWidget(self.test_mic_button, row, 6, 1, 2)
 
         row += 1
-        settings_layout.addWidget(QtWidgets.QLabel("API Base URL"), row, 0)
+        settings_layout.addWidget(QtWidgets.QLabel("API Basis-URL"), row, 0)
         settings_layout.addWidget(self.base_url_edit, row, 1, 1, 4)
         settings_layout.addWidget(QtWidgets.QLabel("API Key"), row, 5)
         settings_layout.addWidget(self.api_key_edit, row, 6, 1, 2)
 
         row += 1
         settings_layout.addWidget(QtWidgets.QLabel("Updates"), row, 0)
-        settings_layout.addWidget(self.update_url_edit, row, 1, 1, 4)
-        settings_layout.addWidget(self.auto_update_check, row, 5)
-        settings_layout.addWidget(self.check_update_button, row, 6, 1, 2)
+        settings_layout.addWidget(self.update_url_edit, row, 1, 1, 5)
+        settings_layout.addWidget(self.auto_update_check, row, 6)
 
         row += 1
         settings_layout.addWidget(QtWidgets.QLabel("TTS"), row, 0)
         settings_layout.addWidget(self.tts_combo, row, 1)
-        settings_layout.addWidget(QtWidgets.QLabel("TTS Voice"), row, 2)
+        settings_layout.addWidget(QtWidgets.QLabel("TTS-Stimme"), row, 2)
         settings_layout.addWidget(self.tts_voice_edit, row, 3)
-        settings_layout.addWidget(QtWidgets.QLabel("Piper Endpoint"), row, 4)
+        settings_layout.addWidget(QtWidgets.QLabel("Piper-Endpunkt"), row, 4)
         settings_layout.addWidget(self.piper_endpoint_edit, row, 5, 1, 3)
 
         row += 1
-        settings_layout.addWidget(QtWidgets.QLabel("System Prompt"), row, 0)
+        settings_layout.addWidget(QtWidgets.QLabel("System-Prompt"), row, 0)
         settings_layout.addWidget(self.system_prompt_edit, row, 1, 1, 7)
         row += 1
         settings_layout.addWidget(self.version_label, row, 6, 1, 2)
@@ -603,11 +620,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chat_view = QtWidgets.QTextEdit()
         self.chat_view.setReadOnly(True)
         self.chat_view.setAcceptRichText(True)
-        self.chat_view.setPlaceholderText("Conversation will appear here...")
+        self.chat_view.setPlaceholderText("Unterhaltung erscheint hier...")
         main_layout.addWidget(self.chat_view, 1)
 
         level_layout = QtWidgets.QHBoxLayout()
-        self.listen_status = QtWidgets.QLabel("Not Listening")
+        self.listen_status = QtWidgets.QLabel("Nicht am Zuhoeren")
         self.level_bar = QtWidgets.QProgressBar()
         self.level_bar.setRange(0, 100)
         self.level_bar.setValue(0)
@@ -618,14 +635,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
         input_layout = QtWidgets.QHBoxLayout()
         self.input_edit = QtWidgets.QPlainTextEdit()
-        self.input_edit.setPlaceholderText("Type a message...")
+        self.input_edit.setPlaceholderText("Nachricht eingeben...")
         self.input_edit.setFixedHeight(70)
         input_layout.addWidget(self.input_edit, 1)
 
         button_layout = QtWidgets.QVBoxLayout()
-        self.listen_button = QtWidgets.QPushButton("Listen")
+        self.listen_button = QtWidgets.QPushButton("Zuhoeren")
         self.listen_button.clicked.connect(self.on_listen_clicked)
-        self.send_button = QtWidgets.QPushButton("Send")
+        self.send_button = QtWidgets.QPushButton("Senden")
         self.send_button.clicked.connect(self.on_send_clicked)
         button_layout.addWidget(self.listen_button)
         button_layout.addWidget(self.send_button)
@@ -635,7 +652,7 @@ class MainWindow(QtWidgets.QMainWindow):
         main_layout.addLayout(input_layout)
 
         status_layout = QtWidgets.QHBoxLayout()
-        self.status_label = QtWidgets.QLabel("Idle")
+        self.status_label = QtWidgets.QLabel("Leerlauf")
         status_layout.addWidget(self.status_label)
         status_layout.addStretch(1)
         status_layout.addWidget(self.auto_send_check)
@@ -672,7 +689,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if index >= 0:
             self.input_device_combo.setCurrentIndex(index)
         self.monitor_check.setChecked(self.settings.value("mic_monitor", False, bool))
-        self.update_url_edit.setText(self.settings.value("update_url", DEFAULT_UPDATE_URL))
+        update_url = self.settings.value("update_url", "")
+        if not update_url:
+            update_url = DEFAULT_UPDATE_URL
+        self.update_url_edit.setText(update_url)
         self.auto_update_check.setChecked(self.settings.value("auto_update", False, bool))
         self.tts_combo.setCurrentIndex(
             self.tts_combo.findData(self.settings.value("tts_engine", "system"))
@@ -724,11 +744,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def populate_input_devices(self):
         current = self.input_device_combo.currentData()
         self.input_device_combo.clear()
-        self.input_device_combo.addItem("System Default", -1)
+        self.input_device_combo.addItem("System-Standard", -1)
         try:
             devices = sd.query_devices()
         except Exception as exc:
-            self.status_label.setText(f"Audio devices error: {exc}")
+            self.status_label.setText(f"Audio-Geraete Fehler: {exc}")
             return
 
         for idx, dev in enumerate(devices):
@@ -819,7 +839,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.monitor_bar.setValue(int(level * 100))
 
     def on_monitor_error(self, message: str):
-        self.status_label.setText(f"Monitor error: {message}")
+        self.status_label.setText(f"Monitor-Fehler: {message}")
 
     def on_test_mic_clicked(self):
         device_index = self.input_device_combo.currentData()
@@ -851,87 +871,99 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception:
             level_val = 0.0
         self.monitor_bar.setValue(int(level_val * 100))
-        self.status_label.setText(f"Mic test ok (level {level_val:.2f})")
+        self.status_label.setText(f"Mikrofon-Test ok (Pegel {level_val:.2f})")
         self.test_mic_button.setEnabled(True)
         if self.monitor_check.isChecked() and self._monitor_paused:
             self.start_monitor()
         self._monitor_paused = False
 
     def on_test_mic_error(self, message: str):
-        self.status_label.setText(f"Mic test error: {message}")
+        self.status_label.setText(f"Mikrofon-Test Fehler: {message}")
         self.test_mic_button.setEnabled(True)
         if self.monitor_check.isChecked() and self._monitor_paused:
             self.start_monitor()
         self._monitor_paused = False
 
+    def set_update_controls_enabled(self, enabled: bool):
+        if hasattr(self, "action_check_updates"):
+            self.action_check_updates.setEnabled(enabled)
+
     def on_check_updates_clicked(self):
         url = self.update_url_edit.text().strip()
         if not url:
-            self.status_label.setText("Update URL not set")
+            url = DEFAULT_UPDATE_URL
+            self.update_url_edit.setText(url)
+        if not url:
+            self.status_label.setText("Update-URL fehlt")
+            QtWidgets.QMessageBox.warning(self, "Updates", "Update-URL fehlt.")
             return
-        self.status_label.setText("Checking for updates...")
-        self.check_update_button.setEnabled(False)
+        self.status_label.setText("Suche nach Updates...")
+        self.set_update_controls_enabled(False)
         worker = UpdateCheckWorker(url, APP_VERSION)
         worker.signals.finished.connect(self.on_update_check_done)
         worker.signals.error.connect(self.on_update_check_error)
         self.threadpool.start(worker)
 
     def on_update_check_done(self, result: object):
-        self.check_update_button.setEnabled(True)
+        self.set_update_controls_enabled(True)
         if not isinstance(result, dict):
-            self.status_label.setText("Update check failed")
+            self.status_label.setText("Update-Pruefung fehlgeschlagen")
+            QtWidgets.QMessageBox.warning(self, "Updates", "Update-Pruefung fehlgeschlagen.")
             return
         status = result.get("status")
         if status == "up_to_date":
-            self.status_label.setText("Up to date")
+            self.status_label.setText("Aktuell")
+            QtWidgets.QMessageBox.information(self, "Updates", "Du hast die aktuelle Version.")
             return
         if status == "update":
             latest = result.get("version", "?")
             url = result.get("url", "")
             msg = QtWidgets.QMessageBox(self)
-            msg.setWindowTitle("Update available")
-            msg.setText(f"Version {latest} is available. Download and install now?")
+            msg.setWindowTitle("Update verfuegbar")
+            msg.setText(f"Version {latest} ist verfuegbar. Jetzt herunterladen und installieren?")
             msg.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
             if msg.exec() == QtWidgets.QMessageBox.Yes:
-                self.status_label.setText("Downloading update...")
-                self.check_update_button.setEnabled(False)
+                self.status_label.setText("Update wird heruntergeladen...")
+                self.set_update_controls_enabled(False)
                 worker = UpdateDownloadWorker(url, "Simon")
                 worker.signals.finished.connect(self.on_update_download_done)
                 worker.signals.error.connect(self.on_update_download_error)
                 self.threadpool.start(worker)
             else:
-                self.status_label.setText("Update postponed")
+                self.status_label.setText("Update verschoben")
             return
-        self.status_label.setText("Update check unknown status")
+        self.status_label.setText("Unbekannter Update-Status")
 
     def on_update_check_error(self, message: str):
-        self.check_update_button.setEnabled(True)
-        self.status_label.setText(f"Update check error: {message}")
+        self.set_update_controls_enabled(True)
+        self.status_label.setText(f"Update-Pruefung Fehler: {message}")
+        QtWidgets.QMessageBox.warning(self, "Updates", f"Update-Pruefung Fehler: {message}")
 
     def on_update_download_done(self, result: object):
-        self.check_update_button.setEnabled(True)
+        self.set_update_controls_enabled(True)
         if not isinstance(result, dict):
-            self.status_label.setText("Update download failed")
+            self.status_label.setText("Update-Download fehlgeschlagen")
             return
         zip_path = result.get("zip")
         if not zip_path:
-            self.status_label.setText("Update download failed")
+            self.status_label.setText("Update-Download fehlgeschlagen")
             return
         try:
             app_path = get_app_bundle_path()
             target_dir = get_update_target_dir(app_path)
             staged = stage_update_from_zip(Path(zip_path), target_dir, "Simon")
             old_app = app_path or (target_dir / "Simon.app")
-            self.status_label.setText("Installing update...")
+            self.status_label.setText("Update wird installiert...")
             launch_update_helper(old_app, staged, os.getpid())
-            QtWidgets.QMessageBox.information(self, "Updating", "Simon will restart to complete the update.")
+            QtWidgets.QMessageBox.information(self, "Update", "Simon startet neu, um das Update abzuschliessen.")
             QtCore.QCoreApplication.quit()
         except Exception as exc:
-            self.status_label.setText(f"Update install error: {exc}")
+            self.status_label.setText(f"Update-Installation Fehler: {exc}")
 
     def on_update_download_error(self, message: str):
-        self.check_update_button.setEnabled(True)
-        self.status_label.setText(f"Update download error: {message}")
+        self.set_update_controls_enabled(True)
+        self.status_label.setText(f"Update-Download Fehler: {message}")
+        QtWidgets.QMessageBox.warning(self, "Updates", f"Update-Download Fehler: {message}")
 
     def on_level(self, level: float):
         self.level_bar.setValue(int(level * 100))
@@ -956,18 +988,18 @@ class MainWindow(QtWidgets.QMainWindow):
                 except Exception:
                     samplerate = 16000
             self.recorder.start(device=None if device_index == -1 else device_index, samplerate=samplerate)
-            self.listen_status.setText("Listening")
-            self.listen_button.setText("Stop")
-            self.status_label.setText("Listening...")
+            self.listen_status.setText("Zuhoeren")
+            self.listen_button.setText("Stopp")
+            self.status_label.setText("Hoere zu...")
         except Exception as exc:
-            self.status_label.setText(f"Audio error: {exc}")
+            self.status_label.setText(f"Audio-Fehler: {exc}")
 
     def stop_listening(self):
         audio, sample_rate = self.recorder.stop()
-        self.listen_status.setText("Not Listening")
-        self.listen_button.setText("Listen")
+        self.listen_status.setText("Nicht am Zuhoeren")
+        self.listen_button.setText("Zuhoeren")
         self.level_bar.setValue(0)
-        self.status_label.setText("Transcribing...")
+        self.status_label.setText("Transkribiere...")
         if self.monitor_check.isChecked() and self._monitor_paused:
             self.start_monitor()
             self._monitor_paused = False
@@ -997,14 +1029,14 @@ class MainWindow(QtWidgets.QMainWindow):
         if warning:
             self.status_label.setText(warning)
         else:
-            self.status_label.setText("Idle")
+            self.status_label.setText("Leerlauf")
 
         if text:
             self.input_edit.setPlainText(text)
             if self.auto_send_check.isChecked():
                 self.on_send_clicked()
         elif not warning:
-            self.status_label.setText("No speech detected")
+            self.status_label.setText("Keine Sprache erkannt")
 
     def on_worker_error(self, message: str):
         self.status_label.setText(message)
@@ -1015,7 +1047,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self.input_edit.clear()
 
-        self.append_message("You", text)
+        self.append_message("Du", text)
         self.messages.append(ChatMessage(role="user", content=text))
 
         system_prompt = self.system_prompt_edit.text().strip()
@@ -1024,7 +1056,7 @@ class MainWindow(QtWidgets.QMainWindow):
             full_messages.append(ChatMessage(role="system", content=system_prompt))
         full_messages.extend(self.messages)
 
-        self.status_label.setText("Thinking...")
+        self.status_label.setText("Denke...")
         self.send_button.setEnabled(False)
         self.listen_button.setEnabled(False)
 
@@ -1040,7 +1072,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.threadpool.start(worker)
 
     def on_llm_done(self, reply: str):
-        self.status_label.setText("Idle")
+        self.status_label.setText("Leerlauf")
         self.send_button.setEnabled(True)
         self.listen_button.setEnabled(True)
         self.messages.append(ChatMessage(role="assistant", content=reply))
