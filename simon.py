@@ -1141,9 +1141,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _auto_refresh_devices(self):
         """Periodically refresh device list to detect newly connected Bluetooth devices."""
-        if self.recorder.is_running:
+        if self.recorder.is_running or self.monitor.is_running:
             return
         try:
+            # Force PortAudio to rescan CoreAudio device list
+            sd._terminate()
+            sd._initialize()
             devices = sd.query_devices()
         except Exception:
             return
@@ -1154,6 +1157,7 @@ class MainWindow(QtWidgets.QMainWindow):
         new_names = {f"{idx}: {name}" for idx, name in input_devices}
         if new_names == current_names:
             return
+        print(f"[Devices] List changed: {new_names - current_names} added, {current_names - new_names} removed", flush=True)
         # Device list changed — update combo, preserve current selection
         prev_data = self.input_device_combo.currentData()
         self.populate_input_devices()
@@ -1167,7 +1171,7 @@ class MainWindow(QtWidgets.QMainWindow):
                         combo_idx = self.input_device_combo.findData(idx)
                         if combo_idx >= 0:
                             self.input_device_combo.setCurrentIndex(combo_idx)
-                            print(f"[Devices] Auto-selected new Bluetooth device: {name}", flush=True)
+                            print(f"[Devices] Auto-selected: {name}", flush=True)
                         break
 
     def _load_settings(self):
