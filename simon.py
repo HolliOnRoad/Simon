@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 import os
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 import numpy as np
@@ -116,7 +116,7 @@ class HistoryStore:
 
     def append(self, role: str, content: str) -> None:
         item = {
-            "ts": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            "ts": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
             "role": role,
             "content": content,
         }
