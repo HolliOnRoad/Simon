@@ -955,8 +955,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.stt_preset_combo.addItem(label, key)
 
         self.input_device_combo = QtWidgets.QComboBox()
-        self.refresh_devices_button = QtWidgets.QPushButton("Aktualisieren")
-        self.refresh_devices_button.clicked.connect(self.populate_input_devices)
+        self.refresh_devices_button = QtWidgets.QPushButton("Geraete suchen")
+        self.refresh_devices_button.clicked.connect(lambda: self._check_device_changes(force_rescan=True))
         self.monitor_check = QtWidgets.QCheckBox("Mikrofon-Monitor")
         self.monitor_bar = QtWidgets.QProgressBar()
         self.monitor_bar.setRange(0, 100)
@@ -1143,12 +1143,16 @@ class MainWindow(QtWidgets.QMainWindow):
         """Periodically refresh device list to detect newly connected Bluetooth devices."""
         if self.recorder.is_running or self.monitor.is_running:
             return
+        self._check_device_changes(force_rescan=False)
+
+    def _check_device_changes(self, force_rescan: bool = False):
         try:
-            # Force PortAudio to rescan CoreAudio device list
-            sd._terminate()
-            sd._initialize()
+            if force_rescan:
+                sd._terminate()
+                sd._initialize()
             devices = sd.query_devices()
-        except Exception:
+        except Exception as exc:
+            print(f"[Devices] refresh error: {exc}", flush=True)
             return
         input_devices = [(idx, dev.get("name", "")) for idx, dev in enumerate(devices)
                          if dev.get("max_input_channels", 0) > 0]
@@ -1157,8 +1161,7 @@ class MainWindow(QtWidgets.QMainWindow):
         new_names = {f"{idx}: {name}" for idx, name in input_devices}
         if new_names == current_names:
             return
-        print(f"[Devices] List changed: {new_names - current_names} added, {current_names - new_names} removed", flush=True)
-        # Device list changed — update combo, preserve current selection
+        print(f"[Devices] changed: +{new_names - current_names} -{current_names - new_names}", flush=True)
         prev_data = self.input_device_combo.currentData()
         self.populate_input_devices()
         # Auto-select newly connected Bluetooth device if on System-Standard
