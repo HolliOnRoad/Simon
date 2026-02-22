@@ -1276,6 +1276,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.silence_threshold_spin.setValue(saved_threshold)
         self.visualizer_check.setChecked(self.settings.value("visualizer_enabled", False, bool))
         self.wake_word_check.setChecked(self.settings.value("wake_word", False, bool))
+        # Auto-start listening on launch if auto_listen is enabled and no wake word
+        if self.settings.value("auto_listen", True, bool) and not self.settings.value("wake_word", False, bool):
+            self._waiting_for_voice = True
+            QtCore.QTimer.singleShot(1000, self.start_listening)
 
     def closeEvent(self, event):
         self._save_settings()
