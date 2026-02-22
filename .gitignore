@@ -1,0 +1,24 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# macOS
+.DS_Store
+
+# Build artifacts
+build/
+dist/
+Simon.app/
+Simon.spec
+
+# PyInstaller
+*.spec
+
+# Logs
+*.log
+
+# VS Code
+.vscode/
