@@ -1243,7 +1243,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tts_voice_edit.setText(self.settings.value("tts_voice", ""))
         self.piper_endpoint_edit.setText(self.settings.value("piper_endpoint", "http://localhost:5002/tts"))
         self.system_prompt_edit.setText(
-            self.settings.value("system_prompt", "Du bist ein hilfreicher KI-Agent. Antworte kurz und klar.")
+            self.settings.value("system_prompt", "Du bist Simon, ein hilfreicher Sprachassistent. Du kannst Sprache erkennen und verarbeiten. Antworte kurz und klar auf Deutsch.")
         )
         self.auto_speak_check.setChecked(self.settings.value("auto_speak", True, bool))
         self.auto_listen_check.setChecked(self.settings.value("auto_listen", True, bool))
@@ -1252,6 +1252,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self.settings.setValue("auto_send", True)
             self.settings.setValue("auto_stop", True)
             self.settings.setValue("migrated_defaults_v2", True)
+            self.settings.sync()
+        # Migration: update old generic system prompt to voice-aware version
+        if not self.settings.value("migrated_system_prompt_v1", False, bool):
+            old = self.settings.value("system_prompt", "")
+            if old in ("", "Du bist ein hilfreicher KI-Agent. Antworte kurz und klar."):
+                self.settings.setValue("system_prompt", "Du bist Simon, ein hilfreicher Sprachassistent. Du kannst Sprache erkennen und verarbeiten. Antworte kurz und klar auf Deutsch.")
+            self.settings.setValue("migrated_system_prompt_v1", True)
             self.settings.sync()
         auto_send = self.settings.value("auto_send", True, bool)
         auto_stop = self.settings.value("auto_stop", True, bool)
