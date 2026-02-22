@@ -19,7 +19,7 @@ PY
 )
 
 TAG=${TAG:-"v$VERSION"}
-GITHUB_REPO=${GITHUB_REPO:-"owner/repo"}
+GITHUB_REPO=${GITHUB_REPO:-"holger/simon"}
 
 mkdir -p dist updates
 

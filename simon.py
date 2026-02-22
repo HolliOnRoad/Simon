@@ -29,6 +29,7 @@ class ChatMessage:
 
 
 APP_VERSION = "1.0.0"
+DEFAULT_UPDATE_URL = "https://raw.githubusercontent.com/holger/simon/main/updates/simon.json"
 
 STT_PRESETS = [
     ("fast", "Fast", {"model": "tiny", "device": "auto", "compute": "int8"}),
@@ -515,7 +516,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.test_mic_button.clicked.connect(self.on_test_mic_clicked)
 
         self.update_url_edit = QtWidgets.QLineEdit()
-        self.update_url_edit.setPlaceholderText("https://example.com/simon-update.json")
+        self.update_url_edit.setPlaceholderText(DEFAULT_UPDATE_URL)
         self.auto_update_check = QtWidgets.QCheckBox("Auto-Check Updates")
         self.check_update_button = QtWidgets.QPushButton("Check Now")
         self.check_update_button.clicked.connect(self.on_check_updates_clicked)
@@ -671,7 +672,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if index >= 0:
             self.input_device_combo.setCurrentIndex(index)
         self.monitor_check.setChecked(self.settings.value("mic_monitor", False, bool))
-        self.update_url_edit.setText(self.settings.value("update_url", ""))
+        self.update_url_edit.setText(self.settings.value("update_url", DEFAULT_UPDATE_URL))
         self.auto_update_check.setChecked(self.settings.value("auto_update", False, bool))
         self.tts_combo.setCurrentIndex(
             self.tts_combo.findData(self.settings.value("tts_engine", "system"))
