@@ -1134,6 +1134,42 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.populate_input_devices()
 
+        # Auto-refresh audio devices every 5s to detect Bluetooth connections
+        self._device_refresh_timer = QtCore.QTimer(self)
+        self._device_refresh_timer.timeout.connect(self._auto_refresh_devices)
+        self._device_refresh_timer.start(5000)
+
+    def _auto_refresh_devices(self):
+        """Periodically refresh device list to detect newly connected Bluetooth devices."""
+        if self.recorder.is_running:
+            return
+        try:
+            devices = sd.query_devices()
+        except Exception:
+            return
+        input_devices = [(idx, dev.get("name", "")) for idx, dev in enumerate(devices)
+                         if dev.get("max_input_channels", 0) > 0]
+        current_names = set(self.input_device_combo.itemText(i)
+                            for i in range(1, self.input_device_combo.count()))
+        new_names = {f"{idx}: {name}" for idx, name in input_devices}
+        if new_names == current_names:
+            return
+        # Device list changed — update combo, preserve current selection
+        prev_data = self.input_device_combo.currentData()
+        self.populate_input_devices()
+        # Auto-select newly connected Bluetooth device if on System-Standard
+        if prev_data == -1 or prev_data is None:
+            for idx, name in input_devices:
+                label = f"{idx}: {name}"
+                if label not in current_names:
+                    bt_keywords = ("airpods", "bluetooth", "headphone", "kopfhörer", "headset")
+                    if any(kw in name.lower() for kw in bt_keywords):
+                        combo_idx = self.input_device_combo.findData(idx)
+                        if combo_idx >= 0:
+                            self.input_device_combo.setCurrentIndex(combo_idx)
+                            print(f"[Devices] Auto-selected new Bluetooth device: {name}", flush=True)
+                        break
+
     def _load_settings(self):
         self.language_combo.setCurrentIndex(
             self.language_combo.findData(self.settings.value("language", "en"))
