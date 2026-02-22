@@ -704,6 +704,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._status_before_update: Optional[str] = None
         self._silence_timer = QtCore.QElapsedTimer()
         self._last_voice_ms = 0
+        self._waiting_for_voice = False
         self._mic_prompt_shown = False
         self._wake_busy = False
         self._wake_last_trigger = 0.0
@@ -974,7 +975,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.silence_threshold_spin = QtWidgets.QDoubleSpinBox()
         self.silence_threshold_spin.setRange(0.01, 0.2)
         self.silence_threshold_spin.setSingleStep(0.01)
-        self.silence_threshold_spin.setValue(0.05)
+        self.silence_threshold_spin.setValue(0.025)
         self.silence_threshold_spin.setDecimals(2)
         self.wake_word_check = QtWidgets.QCheckBox("Wake-Word (Simon)")
         self.wake_status_label = QtWidgets.QLabel("Inaktiv")
@@ -1216,7 +1217,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ptt_check.setChecked(self.settings.value("ptt_enabled", False, bool))
         self.auto_stop_check.setChecked(auto_stop)
         self.silence_duration_spin.setValue(float(self.settings.value("silence_duration", 1.2)))
-        self.silence_threshold_spin.setValue(float(self.settings.value("silence_threshold", 0.05)))
+        saved_threshold = float(self.settings.value("silence_threshold", 0.025))
+        # Migrate old default 0.05 → 0.025 (better for quiet mics like AirPods)
+        if saved_threshold >= 0.05:
+            saved_threshold = 0.025
+            self.settings.setValue("silence_threshold", saved_threshold)
+            self.settings.sync()
+        self.silence_threshold_spin.setValue(saved_threshold)
         self.visualizer_check.setChecked(self.settings.value("visualizer_enabled", False, bool))
         self.wake_word_check.setChecked(self.settings.value("wake_word", False, bool))
 
@@ -1596,22 +1603,29 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._silence_timer.start()
                 self._last_voice_ms = 0
             threshold = float(self.silence_threshold_spin.value())
+            elapsed = self._silence_timer.elapsed()
             if level >= threshold:
-                self._last_voice_ms = self._silence_timer.elapsed()
+                # Voice detected
+                self._waiting_for_voice = False
+                self._last_voice_ms = elapsed
             else:
-                elapsed = self._silence_timer.elapsed()
+                # Silence
+                if self._waiting_for_voice:
+                    # Still waiting for first voice — only stop after 10s of total silence
+                    if elapsed >= 10000:
+                        if self.recorder.is_running:
+                            self.stop_listening()
+                    return
                 if self._last_voice_ms == 0:
                     self._last_voice_ms = elapsed
                 silence_ms = elapsed - self._last_voice_ms
-                if silence_ms > 0 and silence_ms % 500 < 50:
-                    print(f"[AutoStop] level={level:.3f} threshold={threshold:.3f} silence_ms={silence_ms}", flush=True)
                 if silence_ms >= int(self.silence_duration_spin.value() * 1000):
-                    print(f"[AutoStop] TRIGGER level={level:.3f} silence_ms={silence_ms}", flush=True)
                     if self.recorder.is_running:
                         self.stop_listening()
 
     def on_listen_clicked(self):
         if not self.recorder.is_running:
+            self._waiting_for_voice = False  # manual start: no patience mode
             self.start_listening()
         else:
             self.stop_listening()
@@ -1736,6 +1750,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.auto_speak_check.isChecked():
             self.speak(reply)
         if self.auto_listen_check.isChecked() and not self.wake_word_check.isChecked():
+            self._waiting_for_voice = True
             QtCore.QTimer.singleShot(500, self.start_listening)
 
     def on_llm_error(self, message: str):
