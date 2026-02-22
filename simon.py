@@ -29,7 +29,7 @@ class ChatMessage:
 
 
 APP_VERSION = "1.0.0"
-DEFAULT_UPDATE_URL = "https://raw.githubusercontent.com/HolliOnRoad/Simon/main/updates/simon.json"
+DEFAULT_UPDATE_URL = "https://HolliOnRoad.github.io/Simon/updates/simon.json"
 
 STT_PRESETS = [
     ("fast", "Fast", {"model": "tiny", "device": "auto", "compute": "int8"}),

@@ -21,7 +21,7 @@ PY
 TAG=${TAG:-"v$VERSION"}
 GITHUB_REPO=${GITHUB_REPO:-"HolliOnRoad/Simon"}
 
-mkdir -p dist updates
+mkdir -p dist updates docs/updates
 
 ZIP_PATH="dist/Simon.app.zip"
 rm -f "$ZIP_PATH"
@@ -34,9 +34,12 @@ cat <<JSON > updates/simon.json
 {"version":"$VERSION","url":"$URL"}
 JSON
 
+cp -f updates/simon.json docs/updates/simon.json
+
 echo "Release artifacts ready:"
 echo "- $ZIP_PATH"
 echo "- updates/simon.json"
+echo "- docs/updates/simon.json"
 
 echo "\nNext steps:"
 echo "1) Create a GitHub Release $TAG and upload $ZIP_PATH"

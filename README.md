@@ -47,6 +47,9 @@ This produces: `Simon.app`
 The build script generates a green **S‑monogram icon** automatically.
 
 ## Auto Updates (Optional)
+Default update URL (GitHub Pages):
+`https://HolliOnRoad.github.io/Simon/updates/simon.json`
+
 Set an update URL that returns JSON like:
 ```
 {"version":"1.0.1","url":"https://example.com/Simon.app.zip"}
@@ -102,6 +105,17 @@ git push -u origin main
 ```
 
 Repo: `HolliOnRoad/Simon`.
+
+## GitHub Pages (for updates)
+Enable GitHub Pages:
+
+1. Repo → **Settings** → **Pages**
+2. **Source**: Deploy from a branch
+3. **Branch**: `main` and **/docs**
+
+Your update URL will be:
+
+`https://HolliOnRoad.github.io/Simon/updates/simon.json`
 
 ## GitHub Actions (Release Build)
 Workflow file: `.github/workflows/release.yml`

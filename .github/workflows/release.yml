@@ -43,5 +43,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add updates/simon.json
+          mkdir -p docs/updates
+          cp -f updates/simon.json docs/updates/simon.json
+          git add docs/updates/simon.json
           git commit -m "Update simon.json for ${{ github.ref_name }}" || echo "No changes"
           git push origin main
