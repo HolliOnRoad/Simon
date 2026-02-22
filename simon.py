@@ -1146,6 +1146,7 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             if not _has_large:
                 stt_model = "small"
+        self.settings.setValue("stt_model", stt_model)
         self.stt_model_combo.setCurrentIndex(
             self.stt_model_combo.findData(stt_model)
         )
@@ -1155,6 +1156,8 @@ class MainWindow(QtWidgets.QMainWindow):
         stt_compute = self.settings.value("stt_compute", "int8")
         if stt_compute in ("float16", "int8_float16"):
             stt_compute = "int8"
+        self.settings.setValue("stt_compute", stt_compute)
+        self.settings.sync()
         self.stt_compute_combo.setCurrentIndex(
             self.stt_compute_combo.findData(stt_compute)
         )
@@ -1182,9 +1185,18 @@ class MainWindow(QtWidgets.QMainWindow):
             self.settings.value("system_prompt", "Du bist ein hilfreicher KI-Agent. Antworte kurz und klar.")
         )
         self.auto_speak_check.setChecked(self.settings.value("auto_speak", True, bool))
-        self.auto_send_check.setChecked(self.settings.value("auto_send", True, bool))
+        # Migration: force auto_send and auto_stop to True if not yet migrated
+        if not self.settings.value("migrated_defaults_v2", False, bool):
+            self.settings.setValue("auto_send", True)
+            self.settings.setValue("auto_stop", True)
+            self.settings.setValue("migrated_defaults_v2", True)
+            self.settings.sync()
+        auto_send = self.settings.value("auto_send", True, bool)
+        auto_stop = self.settings.value("auto_stop", True, bool)
+        print(f"[Settings] auto_send={auto_send} auto_stop={auto_stop}", flush=True)
+        self.auto_send_check.setChecked(auto_send)
         self.ptt_check.setChecked(self.settings.value("ptt_enabled", False, bool))
-        self.auto_stop_check.setChecked(self.settings.value("auto_stop", True, bool))
+        self.auto_stop_check.setChecked(auto_stop)
         self.silence_duration_spin.setValue(float(self.settings.value("silence_duration", 1.2)))
         self.silence_threshold_spin.setValue(float(self.settings.value("silence_threshold", 0.05)))
         self.visualizer_check.setChecked(self.settings.value("visualizer_enabled", False, bool))
@@ -1628,6 +1640,7 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.status_label.setText("Leerlauf")
 
+        print(f"[Transcription] text={text!r} auto_send={self.auto_send_check.isChecked()}", flush=True)
         if text:
             self.input_edit.setPlainText(text)
             if self.auto_send_check.isChecked():
