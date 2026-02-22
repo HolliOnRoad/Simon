@@ -690,7 +690,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.input_device_combo.setCurrentIndex(index)
         self.monitor_check.setChecked(self.settings.value("mic_monitor", False, bool))
         update_url = self.settings.value("update_url", "")
-        if not update_url:
+        if not update_url or "example.com" in str(update_url):
             update_url = DEFAULT_UPDATE_URL
         self.update_url_edit.setText(update_url)
         self.auto_update_check.setChecked(self.settings.value("auto_update", False, bool))
