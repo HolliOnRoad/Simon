@@ -61,7 +61,7 @@ Then enable **Auto‑Check Updates** or click **Check Now**.
 
 Set these environment variables before running `release.sh`:
 ```bash
-export GITHUB_REPO="holger/simon"
+export GITHUB_REPO="HolliOnRoad/Simon"
 export TAG="v1.0.0"
 ```
 
@@ -96,9 +96,9 @@ git commit -m "Initial commit"
 
 git branch -M main
 
-git remote add origin https://github.com/holger/simon.git
+git remote add origin https://github.com/HolliOnRoad/Simon.git
 
 git push -u origin main
 ```
 
-Repo: `holger/simon`.
+Repo: `HolliOnRoad/Simon`.
