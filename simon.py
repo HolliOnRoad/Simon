@@ -1153,8 +1153,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.stt_device_combo.findData(self.settings.value("stt_device", "auto"))
         )
         stt_compute = self.settings.value("stt_compute", "int8")
-        if stt_compute == "float16":
-            stt_compute = "int8_float16"
+        if stt_compute in ("float16", "int8_float16"):
+            stt_compute = "int8"
         self.stt_compute_combo.setCurrentIndex(
             self.stt_compute_combo.findData(stt_compute)
         )
@@ -1184,7 +1184,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.auto_speak_check.setChecked(self.settings.value("auto_speak", True, bool))
         self.auto_send_check.setChecked(self.settings.value("auto_send", True, bool))
         self.ptt_check.setChecked(self.settings.value("ptt_enabled", False, bool))
-        self.auto_stop_check.setChecked(self.settings.value("auto_stop", False, bool))
+        self.auto_stop_check.setChecked(self.settings.value("auto_stop", True, bool))
         self.silence_duration_spin.setValue(float(self.settings.value("silence_duration", 1.2)))
         self.silence_threshold_spin.setValue(float(self.settings.value("silence_threshold", 0.05)))
         self.visualizer_check.setChecked(self.settings.value("visualizer_enabled", False, bool))
