@@ -525,13 +525,17 @@ class LLMWorker(QtCore.QRunnable):
             base = self.api_base or "http://localhost:11434"
             url = base.rstrip("/") + "/api/chat"
             payload = {
-                "model": self.model or "llama3.1:8b",
+                "model": self.model or "mistral:7b-instruct",
                 "messages": payload_messages,
                 "stream": False,
             }
             resp = requests.post(url, json=payload, timeout=120)
             if resp.status_code != 200:
-                raise RuntimeError(f"Ollama HTTP {resp.status_code}")
+                try:
+                    err = resp.json().get("error", "")
+                except Exception:
+                    err = ""
+                raise RuntimeError(err or f"Ollama HTTP {resp.status_code}")
             data = resp.json()
             if "message" in data and "content" in data["message"]:
                 return data["message"]["content"]
@@ -920,7 +924,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.provider_combo.addItem("API (OpenAI-kompatibel)", "openai")
         self.provider_combo.currentIndexChanged.connect(self.on_provider_changed)
 
-        self.model_edit = QtWidgets.QLineEdit()
+        self.model_combo = QtWidgets.QComboBox()
+        self.model_combo.setEditable(True)
+        self.model_combo.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
+        self.model_combo.setMinimumWidth(160)
         self.base_url_edit = QtWidgets.QLineEdit()
         self.api_key_edit = QtWidgets.QLineEdit()
         self.api_key_edit.setEchoMode(QtWidgets.QLineEdit.Password)
@@ -1010,7 +1017,7 @@ class MainWindow(QtWidgets.QMainWindow):
         settings_layout.addWidget(QtWidgets.QLabel("LLM"), row, 2)
         settings_layout.addWidget(self.provider_combo, row, 3)
         settings_layout.addWidget(QtWidgets.QLabel("Modell"), row, 4)
-        settings_layout.addWidget(self.model_edit, row, 5)
+        settings_layout.addWidget(self.model_combo, row, 5)
         settings_layout.addWidget(self.auto_speak_check, row, 6)
 
         row += 1
@@ -1131,8 +1138,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.provider_combo.setCurrentIndex(
             self.provider_combo.findData(self.settings.value("provider", "ollama"))
         )
-        self.model_edit.setText(self.settings.value("model", "llama3.1:8b"))
         self.base_url_edit.setText(self.settings.value("api_base", "http://localhost:11434"))
+        saved_model = self.settings.value("model", "mistral:7b-instruct")
+        if self.provider_combo.currentData() == "ollama":
+            self._populate_ollama_models()
+        if not self.model_combo.currentText().strip():
+            self.model_combo.setCurrentText(saved_model)
+        # restore saved model after populate (populate may have changed selection)
+        idx = self.model_combo.findText(saved_model)
+        if idx >= 0:
+            self.model_combo.setCurrentIndex(idx)
+        else:
+            self.model_combo.setCurrentText(saved_model)
         self.api_key_edit.setText(self.settings.value("api_key", ""))
         stt_model = self.settings.value("stt_model", "small")
         # Fall back to small if large-v3 is not cached (avoids silent download failures)
@@ -1209,7 +1226,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _save_settings(self):
         self.settings.setValue("language", self.language_combo.currentData())
         self.settings.setValue("provider", self.provider_combo.currentData())
-        self.settings.setValue("model", self.model_edit.text().strip())
+        self.settings.setValue("model", self.model_combo.currentText().strip())
         self.settings.setValue("api_base", self.base_url_edit.text().strip())
         self.settings.setValue("api_key", self.api_key_edit.text().strip())
         self.settings.setValue("stt_model", self.stt_model_combo.currentData())
@@ -1256,11 +1273,31 @@ class MainWindow(QtWidgets.QMainWindow):
         if provider == "ollama":
             if not self.base_url_edit.text().strip():
                 self.base_url_edit.setText("http://localhost:11434")
-            if not self.model_edit.text().strip():
-                self.model_edit.setText("llama3.1:8b")
+            self._populate_ollama_models()
         else:
             if self.base_url_edit.text().strip() == "http://localhost:11434":
                 self.base_url_edit.setText("")
+
+    def _populate_ollama_models(self):
+        base = self.base_url_edit.text().strip() or "http://localhost:11434"
+        current = self.model_combo.currentText().strip()
+        try:
+            resp = requests.get(base.rstrip("/") + "/api/tags", timeout=3)
+            if resp.status_code == 200:
+                models = [m["name"] for m in resp.json().get("models", [])]
+                self.model_combo.blockSignals(True)
+                self.model_combo.clear()
+                for m in models:
+                    self.model_combo.addItem(m)
+                self.model_combo.blockSignals(False)
+                # restore saved value or pick first
+                idx = self.model_combo.findText(current)
+                if idx >= 0:
+                    self.model_combo.setCurrentIndex(idx)
+                elif models:
+                    self.model_combo.setCurrentIndex(0)
+        except Exception:
+            pass  # Ollama not reachable, keep existing text
 
     def populate_input_devices(self):
         current = self.input_device_combo.currentData()
@@ -1673,7 +1710,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         worker = LLMWorker(
             provider=self.provider_combo.currentData(),
-            model=self.model_edit.text().strip(),
+            model=self.model_combo.currentText().strip(),
             api_base=self.base_url_edit.text().strip(),
             api_key=self.api_key_edit.text().strip(),
             messages=full_messages,
